@@ -5,7 +5,7 @@ COPY package*.json ./
 COPY ui/package*.json ./ui/
 RUN npm ci --workspace=ui --ignore-scripts
 COPY ui/ ./ui/
-RUN npm run build:ui
+RUN npm --prefix ui run build
 
 # Stage 2: Build Go Server with embedded UI
 FROM golang:1.23-alpine AS server-builder
