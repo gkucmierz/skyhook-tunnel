@@ -1,7 +1,8 @@
 <script setup>
 import { currentLang, setLang, t } from '../locales.js';
+import { useRouter } from '../router.js';
 
-defineProps({
+const props = defineProps({
   gatewayOnline: {
     type: Boolean,
     default: true,
@@ -10,13 +11,19 @@ defineProps({
     type: Number,
     default: 0,
   },
+  isAdmin: {
+    type: Boolean,
+    default: false,
+  },
 });
+
+const router = useRouter();
 </script>
 
 <template>
   <header class="site-header">
     <div class="header-content">
-      <div class="brand">
+      <div class="brand" @click="router.push('/')" role="button" tabindex="0">
         <div class="logo-box">
           <svg width="32" height="32" viewBox="0 0 512 512" fill="none">
             <rect width="512" height="512" rx="128" fill="#07090e" />
@@ -34,17 +41,36 @@ defineProps({
         </div>
         <div class="brand-text">
           <span class="brand-name">SKYHOOK</span>
-          <span class="brand-badge">TUNNEL</span>
+          <span class="brand-badge" :class="{ 'admin-badge-color': isAdmin }">
+            {{ isAdmin ? 'ADMIN' : 'TUNNEL' }}
+          </span>
         </div>
       </div>
 
       <nav class="nav-links">
-        <a href="#quickstart" class="nav-link">{{ t('nav.quickstart') }}</a>
-        <a href="#dashboard" class="nav-link">
-          {{ t('nav.tunnels') }}
-          <span v-if="activeTunnelCount > 0" class="tunnel-count-badge">{{ activeTunnelCount }}</span>
-        </a>
-        <a href="#architecture" class="nav-link">{{ t('nav.architecture') }}</a>
+        <template v-if="isAdmin">
+          <button type="button" class="nav-link btn-nav-link" @click="router.push('/')">
+            {{ t('nav.home') }}
+          </button>
+          <button type="button" class="nav-link btn-nav-link active" @click="router.push('/admin')">
+            {{ t('nav.admin') }}
+          </button>
+        </template>
+        <template v-else>
+          <a href="#quickstart" class="nav-link">{{ t('nav.quickstart') }}</a>
+          <a href="#dashboard" class="nav-link">
+            {{ t('nav.tunnels') }}
+            <span v-if="activeTunnelCount > 0" class="tunnel-count-badge">{{ activeTunnelCount }}</span>
+          </a>
+          <a href="#architecture" class="nav-link">{{ t('nav.architecture') }}</a>
+          <button type="button" class="nav-link btn-nav-link admin-pill-btn" @click="router.push('/admin')">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <span>{{ t('nav.admin') }}</span>
+          </button>
+        </template>
       </nav>
 
       <div class="header-right">
@@ -118,6 +144,7 @@ defineProps({
   display: flex;
   align-items: center;
   gap: 12px;
+  cursor: pointer;
 }
 
 .logo-box {
@@ -150,6 +177,13 @@ defineProps({
   color: #c084fc;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
+  transition: all 0.2s ease;
+}
+
+.brand-badge.admin-badge-color {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
 }
 
 .nav-links {
@@ -171,6 +205,36 @@ defineProps({
 
 .nav-link:hover {
   color: #ffffff;
+}
+
+.btn-nav-link {
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-nav-link.active {
+  color: #fff;
+  font-weight: 700;
+}
+
+.admin-pill-btn {
+  padding: 4px 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: var(--radius-pill);
+  color: var(--accent-cyan);
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.admin-pill-btn:hover {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #fff;
 }
 
 .tunnel-count-badge {

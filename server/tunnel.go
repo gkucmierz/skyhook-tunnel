@@ -61,14 +61,22 @@ func (r *TunnelRegistry) Register(subdomain string, session TunnelSession) (*Tun
 	return info, nil
 }
 
-func (r *TunnelRegistry) Unregister(subdomain string) {
+func (r *TunnelRegistry) Unregister(subdomain string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if info, exists := r.tunnels[subdomain]; exists {
 		info.Session.Close()
 		delete(r.tunnels, subdomain)
+		return true
 	}
+	return false
+}
+
+func (r *TunnelRegistry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.tunnels)
 }
 
 func (r *TunnelRegistry) Get(subdomain string) (*TunnelInfo, bool) {

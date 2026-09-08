@@ -15,6 +15,10 @@ export default defineConfig({
         target: 'ws://localhost:17356',
         ws: true,
       },
+      '/tunnel_ws': {
+        target: 'ws://localhost:17356',
+        ws: true,
+      },
     },
   },
 });

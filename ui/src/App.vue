@@ -1,11 +1,13 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import { useRoute } from './router.js';
 import Header from './components/Header.vue';
-import HeroBanner from './components/HeroBanner.vue';
-import QuickStart from './components/QuickStart.vue';
-import TunnelDashboard from './components/TunnelDashboard.vue';
-import ArchitectureDoc from './components/ArchitectureDoc.vue';
+import LandingView from './views/LandingView.vue';
+import AdminView from './views/AdminView.vue';
 import Footer from './components/Footer.vue';
+
+const route = useRoute();
+const isAdmin = computed(() => route.value.path.startsWith('/admin') || route.value.path.startsWith('/login'));
 
 const gatewayOnline = ref(true);
 const activeTunnelCount = ref(0);
@@ -23,6 +25,14 @@ async function checkStatus() {
   }
 }
 
+watch(isAdmin, (adminMode) => {
+  if (adminMode) {
+    document.title = 'Admin Portal | Skyhook Tunnel';
+  } else {
+    document.title = 'Skyhook Tunnel | Fast & Secure Ingress';
+  }
+}, { immediate: true });
+
 onMounted(() => {
   checkStatus();
 });
@@ -30,12 +40,14 @@ onMounted(() => {
 
 <template>
   <div class="app-layout">
-    <Header :gateway-online="gatewayOnline" :active-tunnel-count="activeTunnelCount" />
+    <Header
+      :gateway-online="gatewayOnline"
+      :active-tunnel-count="activeTunnelCount"
+      :is-admin="isAdmin"
+    />
     <main class="main-content">
-      <HeroBanner />
-      <QuickStart />
-      <TunnelDashboard />
-      <ArchitectureDoc />
+      <AdminView v-if="isAdmin" />
+      <LandingView v-else />
     </main>
     <Footer />
   </div>

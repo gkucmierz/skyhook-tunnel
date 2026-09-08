@@ -13,7 +13,7 @@ import { t } from '../locales.js';
       </div>
 
       <div class="footer-meta">
-        <span class="footer-node">{{ t('footer.edge') }}</span>
+        <span class="footer-node">{{ t('footer.edge') }} • v1.2.0</span>
         <span class="footer-license">{{ t('footer.license') }}</span>
       </div>
     </div>

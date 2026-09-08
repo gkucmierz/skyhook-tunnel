@@ -1,8 +1,10 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { useRouter } from '../router.js';
 import { t } from '../locales.js';
 
-const tunnels = ref([]);
+const router = useRouter();
+
 const stats = ref({
   active_count: 0,
   domain: 'skyhook.7u.pl',
@@ -18,7 +20,6 @@ async function fetchTelemetry() {
     const res = await fetch('/api/tunnels');
     if (!res.ok) throw new Error('API offline');
     const data = await res.json();
-    tunnels.value = data.tunnels || [];
     stats.value = {
       active_count: data.active_count || 0,
       domain: data.domain || 'skyhook.7u.pl',
@@ -32,29 +33,24 @@ async function fetchTelemetry() {
   }
 }
 
-function formatBytes(bytes) {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
+let isPolling = false;
 
-function formatDuration(dateStr) {
-  if (!dateStr) return t('dashboard.time.justNow');
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diff < 60) return `${diff}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  return `${Math.floor(diff / 3600)}h`;
+async function pollTelemetry() {
+  if (!isPolling) return;
+  await fetchTelemetry();
+  if (isPolling) {
+    pollTimer = setTimeout(pollTelemetry, 3000);
+  }
 }
 
 onMounted(() => {
-  fetchTelemetry();
-  pollTimer = setInterval(fetchTelemetry, 3000);
+  isPolling = true;
+  pollTelemetry();
 });
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer);
+  isPolling = false;
+  if (pollTimer) clearTimeout(pollTimer);
 });
 </script>
 
@@ -97,7 +93,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Active Tunnels Table / Empty state -->
+    <!-- Active Sessions Box (Protected State or Empty State) -->
     <div class="tunnels-list-box glass-panel">
       <div class="box-header">
         <span class="box-title">{{ t('dashboard.table.title') }}</span>
@@ -111,48 +107,28 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div v-if="tunnels.length > 0" class="table-wrapper">
-        <table class="tunnels-table">
-          <thead>
-            <tr>
-              <th>{{ t('dashboard.table.subdomain') }}</th>
-              <th>{{ t('dashboard.table.publicUrl') }}</th>
-              <th>{{ t('dashboard.table.transport') }}</th>
-              <th>{{ t('dashboard.table.requests') }}</th>
-              <th>{{ t('dashboard.table.transfer') }}</th>
-              <th>{{ t('dashboard.table.sessionTime') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="tTunnel in tunnels" :key="tTunnel.subdomain">
-              <td class="col-subdomain">
-                <span class="live-dot"></span>
-                <strong>{{ tTunnel.subdomain }}</strong>
-              </td>
-              <td class="col-url">
-                <a :href="tTunnel.public_url" target="_blank" rel="noopener noreferrer" class="url-link">
-                  {{ tTunnel.public_url }}
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                    <polyline points="15 3 21 3 21 9"></polyline>
-                    <line x1="10" y1="14" x2="21" y2="3"></line>
-                  </svg>
-                </a>
-              </td>
-              <td>
-                <span class="transport-tag" :class="tTunnel.transport?.includes('QUIC') ? 'quic' : 'ws'">
-                  {{ tTunnel.transport || 'WebSocket' }}
-                </span>
-              </td>
-              <td class="col-num">{{ tTunnel.total_requests || 0 }} req</td>
-              <td class="col-num">{{ formatBytes(tTunnel.total_bytes) }}</td>
-              <td class="col-time">{{ formatDuration(tTunnel.connected_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- State A: Active Tunnels are Connected -> Safe Secure State -->
+      <div v-if="stats.active_count > 0" class="secure-state">
+        <div class="secure-icon-box">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <h3 class="secure-title">
+          {{ stats.active_count }} {{ stats.active_count === 1 ? t('dashboard.secure.titleSingle') : t('dashboard.secure.titlePlural') }}
+        </h3>
+        <p class="secure-desc">{{ t('dashboard.secure.desc') }}</p>
+        <button type="button" class="admin-portal-cta" @click="router.push('/admin')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span>{{ t('dashboard.secure.manageBtn') }}</span>
+        </button>
       </div>
 
-      <!-- Empty State -->
+      <!-- State B: No Active Tunnels -> Empty state instructions -->
       <div v-else class="empty-state">
         <div class="empty-icon-box">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -404,5 +380,61 @@ onUnmounted(() => {
   font-family: var(--font-mono);
   font-size: 13px;
   margin-top: 4px;
+}
+
+.secure-state {
+  text-align: center;
+  padding: 46px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.secure-icon-box {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.secure-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.secure-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 480px;
+  line-height: 1.5;
+}
+
+.admin-portal-cta {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: var(--radius-pill);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-portal-cta:hover {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(168, 85, 247, 0.35));
+  border-color: var(--accent-cyan);
+  transform: translateY(-1px);
 }
 </style>

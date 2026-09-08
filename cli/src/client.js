@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 
 export function startTunnel({
   port,
+  localHost = '127.0.0.1',
   subdomain,
   server = 'skyhook.7u.pl',
   secure = true,
@@ -10,7 +11,8 @@ export function startTunnel({
   onClose,
 }) {
   const protocol = secure ? 'wss' : 'ws';
-  const wsUrl = `${protocol}://${server}/tunnel_ws?subdomain=${encodeURIComponent(subdomain)}`;
+  const cleanServer = server.replace(/^(https?|wss?):\/\//i, '').replace(/\/+$/, '');
+  const wsUrl = `${protocol}://${cleanServer}/tunnel_ws?subdomain=${encodeURIComponent(subdomain)}`;
 
   const ws = new WebSocket(wsUrl);
 
@@ -42,7 +44,7 @@ export function startTunnel({
       const req = packet.request;
 
       try {
-        const localUrl = `http://127.0.0.1:${port}${req.url}`;
+        const localUrl = `http://${localHost}:${port}${req.url}`;
         const fetchOptions = {
           method: req.method,
           headers: {},

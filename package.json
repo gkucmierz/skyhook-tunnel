@@ -1,6 +1,6 @@
 {
   "name": "skyhook-tunnel",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "High-performance QUIC & WebSocket reverse-tunnel and proxy system",
   "type": "module",
@@ -16,7 +16,7 @@
     "dev:cli": "npm --prefix cli link",
     "tidy": "cd server && go mod tidy",
     "build": "npm run build:ui && npm run build:server",
-    "build:ui": "npm --prefix ui run build",
+    "build:ui": "npm --prefix ui run build && cp -r ui/dist/* server/dist/",
     "build:server": "cd server && go build -o bin/server .",
     "publish:cli": "npm publish ./cli --access public",
     "publish:cli:gitea": "npm publish ./cli --registry https://gitea.7u.pl/api/packages/gkucmierz/npm/"

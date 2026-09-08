@@ -5,39 +5,136 @@ import path from 'path';
 import crypto from 'crypto';
 import { startTunnel } from '../src/client.js';
 import { generateSubdomain } from '../src/names.js';
+import { getDeterministicPort, sanitizeSubdomain, readCurrentPackageName } from '../src/dport.js';
+
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const version = pkg.version;
 
 const args = process.argv.slice(2);
 
-if (args.length === 0 || args.includes('--help') || args.includes('-h') || args.includes('help')) {
+// Handle version query (-v, -V, --version, version)
+if (args.includes('-v') || args.includes('-V') || args.includes('--version') || args.includes('version')) {
+  console.log(`skyhook v${version}`);
+  process.exit(0);
+}
+
+// Check for explicit --dport / -d flag
+let explicitDportProject = null;
+const dportIdx = args.findIndex((a) => a === '--dport' || a === '-d');
+if (dportIdx !== -1) {
+  if (args[dportIdx + 1] && !args[dportIdx + 1].startsWith('-')) {
+    explicitDportProject = args[dportIdx + 1];
+  } else {
+    explicitDportProject = readCurrentPackageName();
+    if (!explicitDportProject) {
+      console.error('\x1b[31mError: --dport flag used without project name, and no package.json found in current directory.\x1b[0m');
+      process.exit(1);
+    }
+  }
+}
+
+// Parse non-flag arguments
+const nonFlagArgs = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '--name' || a === '-n' || a === '--server' || a === '-s') {
+    i++; // skip next arg (its value)
+    continue;
+  }
+  if (a === '--dport' || a === '-d') {
+    if (args[i + 1] && !args[i + 1].startsWith('-')) {
+      i++; // skip next arg (its value)
+    }
+    continue;
+  }
+  if (!a.startsWith('-')) {
+    nonFlagArgs.push(a);
+  }
+}
+
+let targetArg = explicitDportProject || nonFlagArgs[0];
+let isExplicitDport = Boolean(explicitDportProject);
+
+// Auto-detect package.json project name if no arguments passed at all
+if (!targetArg && args.length === 0) {
+  const cwdPkg = readCurrentPackageName();
+  if (cwdPkg) {
+    targetArg = cwdPkg;
+    isExplicitDport = true;
+  }
+}
+
+if (!targetArg || args.includes('--help') || args.includes('-h') || args.includes('help')) {
   console.log(`
-\x1b[36m\x1b[1m⚡ Skyhook Tunnel CLI\x1b[0m
+\x1b[36m\x1b[1m⚡ Skyhook Tunnel CLI v${version}\x1b[0m
 Expose your local development servers to the public internet securely.
 
 \x1b[1mUsage:\x1b[0m
-  skyhook <port> [options]
-  npx @gkucmierz/skyhook <port> [options]
+  skyhook <port | project | url> [options]
+  npx @gkucmierz/skyhook <port | project | url> [options]
 
 \x1b[1mOptions:\x1b[0m
   --name, -n <subdomain>   Specify a custom subdomain (e.g. --name bravia)
+  --dport, -d [project]    Calculate deterministic port using @gkucmierz/dport
   --server, -s <host>      Specify gateway server (default: skyhook.7u.pl)
   --no-tls                 Connect using unencrypted ws:// (for local dev)
+  --version, -v            Show version number
   --help, -h               Show this help message
 
 \x1b[1mExamples:\x1b[0m
-  skyhook 3000
-  skyhook 34200 --name tv-pilot
-  skyhook 8080 -s localhost:80 --no-tls
+  skyhook 3000                           # Tunnel port 3000
+  skyhook tv-pilot                       # Auto-detect dport for tv-pilot & route to tv-pilot.skyhook.7u.pl
+  skyhook tv-pilot --name remote-pilot   # Custom public subdomain for tv-pilot
+  skyhook -d                             # Auto-detect project in current dir via package.json
+  skyhook http://localhost:34200/        # Tunnel from full URL
+  skyhook 8080 -s localhost:17356        # Connect to local gateway
 `);
   process.exit(0);
 }
 
-// Parse port
-const portArg = args.find((a) => !a.startsWith('-') && !isNaN(Number(a)));
-if (!portArg) {
-  console.error('\x1b[31mError: Please specify a valid local port number (e.g. skyhook 3000)\x1b[0m');
+let targetPort = null;
+let targetHost = '127.0.0.1';
+let detectedProjectName = null;
+
+if (isExplicitDport) {
+  // Explicit -d / --dport flag used: calculate port directly
+  detectedProjectName = targetArg;
+  targetPort = getDeterministicPort(detectedProjectName);
+} else if (/^\d+$/.test(targetArg)) {
+  // Pure port number (e.g. 3000, 34200)
+  targetPort = Number(targetArg);
+} else if (/^:\d+$/.test(targetArg)) {
+  // Colon port (e.g. :3000)
+  targetPort = Number(targetArg.slice(1));
+} else if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(targetArg)) {
+  // Full URL (e.g. http://localhost:34200/ or https://192.168.1.50:8080)
+  try {
+    const parsed = new URL(targetArg);
+    targetHost = parsed.hostname || '127.0.0.1';
+    targetPort = parsed.port ? Number(parsed.port) : (parsed.protocol === 'https:' ? 443 : 80);
+  } catch {
+    console.error(`\x1b[31mError: Could not parse URL from "${targetArg}"\x1b[0m`);
+    process.exit(1);
+  }
+} else if (/^([a-zA-Z0-9_.-]+):(\d+)$/.test(targetArg)) {
+  // Host with port (e.g. localhost:34200 or 192.168.1.100:8080)
+  const match = targetArg.match(/^([a-zA-Z0-9_.-]+):(\d+)$/);
+  targetHost = match[1];
+  targetPort = Number(match[2]);
+} else if (['localhost', '127.0.0.1', '0.0.0.0'].includes(targetArg.toLowerCase())) {
+  // Bare loopback address without explicit port: default to standard HTTP port 80
+  targetHost = targetArg;
+  targetPort = 80;
+} else {
+  // Fallback: It is a project name! Resolve deterministic port via dport
+  detectedProjectName = targetArg;
+  targetPort = getDeterministicPort(detectedProjectName);
+}
+
+if (!targetPort || isNaN(targetPort) || targetPort < 1 || targetPort > 65535) {
+  console.error(`\x1b[31mError: Invalid port number "${targetPort}"\x1b[0m`);
   process.exit(1);
 }
-const localPort = Number(portArg);
 
 // Parse custom subdomain
 let customSubdomain = null;
@@ -46,31 +143,67 @@ if (nameIdx !== -1 && args[nameIdx + 1]) {
   customSubdomain = args[nameIdx + 1];
 }
 
-// If no custom name specified, generate a friendly 2-word random subdomain (e.g. "neon-lagoon")
+// If no custom name specified, but a project name was detected, default subdomain to project name!
+if (!customSubdomain && detectedProjectName) {
+  customSubdomain = sanitizeSubdomain(detectedProjectName);
+}
+
+// If still no custom name specified, generate a friendly 2-word random subdomain (e.g. "neon-lagoon")
 if (!customSubdomain) {
   customSubdomain = generateSubdomain();
 }
 
 // Parse server
-let serverHost = 'skyhook.7u.pl';
+let rawServer = 'skyhook.7u.pl';
 const serverIdx = args.findIndex((a) => a === '--server' || a === '-s');
 if (serverIdx !== -1 && args[serverIdx + 1]) {
-  serverHost = args[serverIdx + 1];
+  rawServer = args[serverIdx + 1];
+}
+
+let serverHost = rawServer.trim();
+let explicitProtocol = null;
+
+if (/^(https?|wss?):\/\//i.test(serverHost)) {
+  try {
+    const parsed = new URL(serverHost);
+    explicitProtocol = parsed.protocol.toLowerCase();
+    serverHost = parsed.host; // e.g. "localhost:17356" or "skyhook.7u.pl"
+  } catch {
+    serverHost = serverHost.replace(/^(https?|wss?):\/\//i, '').replace(/\/+$/, '');
+  }
+} else {
+  serverHost = serverHost.replace(/\/+$/, '');
 }
 
 const isLocalhost = serverHost.includes('localhost') || serverHost.includes('127.0.0.1') || serverHost.includes('0.0.0.0');
 if (isLocalhost && !serverHost.includes(':')) {
   serverHost = `${serverHost}:17356`;
+} else if (isLocalhost && serverHost.endsWith(':34430')) {
+  console.log('  \x1b[33mℹ Note: Port 34430 is the Vite UI dev server. Connecting to Go gateway on port 17356...\x1b[0m');
+  serverHost = serverHost.replace(':34430', ':17356');
 }
-const isSecure = args.includes('--tls') || (!args.includes('--no-tls') && !isLocalhost);
+
+let isSecure = true;
+if (args.includes('--tls') || explicitProtocol === 'https:' || explicitProtocol === 'wss:') {
+  isSecure = true;
+} else if (args.includes('--no-tls') || explicitProtocol === 'http:' || explicitProtocol === 'ws:' || isLocalhost) {
+  isSecure = false;
+}
+
+const bannerText = `⚡ SKYHOOK TUNNEL v${version}`;
+const totalWidth = 62;
+const padTotal = Math.max(0, totalWidth - bannerText.length);
+const padLeft = Math.floor(padTotal / 2);
+const padRight = padTotal - padLeft;
 
 console.log(`\n\x1b[36m\x1b[1m╔════════════════════════════════════════════════════════════════╗\x1b[0m`);
-console.log(`\x1b[36m\x1b[1m║                   ⚡ SKYHOOK TUNNEL v1.1.0                      ║\x1b[0m`);
+console.log(`\x1b[36m\x1b[1m║${' '.repeat(padLeft)}${bannerText}${' '.repeat(padRight)}║\x1b[0m`);
 console.log(`\x1b[36m\x1b[1m╚════════════════════════════════════════════════════════════════╝\x1b[0m`);
 console.log(`  \x1b[90mConnecting to gateway:\x1b[0m ${serverHost} ...`);
 
 startTunnel({
-  port: localPort,
+  port: targetPort,
+  localHost: targetHost,
   subdomain: customSubdomain,
   server: serverHost,
   secure: isSecure,
@@ -78,10 +211,13 @@ startTunnel({
     const portPart = serverHost.includes(':') ? `:${serverHost.split(':')[1]}` : '';
     const displayUrl = isLocalhost ? `http://${ack.subdomain}.localhost${portPart}/` : ack.url;
     console.log(`\n  \x1b[32m✔ Tunnel Online!\x1b[0m\n`);
-    console.log(`  \x1b[1mLocal Target:\x1b[0m  http://localhost:${localPort}`);
+    if (detectedProjectName) {
+      console.log(`  \x1b[1mProject:\x1b[0m       \x1b[35m${detectedProjectName}\x1b[0m \x1b[90m(dport: ${targetPort})\x1b[0m`);
+    }
+    console.log(`  \x1b[1mLocal Target:\x1b[0m  http://${targetHost}:${targetPort}`);
     console.log(`  \x1b[1mTunnel URL:\x1b[0m    \x1b[36m\x1b[4m${displayUrl}\x1b[0m`);
     console.log(`  \x1b[1mSubdomain:\x1b[0m     ${ack.subdomain}`);
-    console.log(`\n  \x1b[90mForwarding incoming web requests to localhost:${localPort}...\x1b[0m`);
+    console.log(`\n  \x1b[90mForwarding incoming web requests to ${targetHost}:${targetPort}...\x1b[0m`);
     console.log(`  \x1b[90mPress Ctrl+C to close tunnel\x1b[0m\n`);
   },
   onError: (err) => {

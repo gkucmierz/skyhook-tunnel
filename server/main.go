@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -18,10 +19,53 @@ import (
 	"time"
 )
 
+const ServerVersion = "1.2.0"
+
 //go:embed all:dist
 var embeddedUI embed.FS
 
+func validateAdminAuth(r *http.Request, adminPassword string) bool {
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(adminPassword)) == 1 {
+			return true
+		}
+	}
+	if cookie, err := r.Cookie("skyhook_admin_token"); err == nil {
+		if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(adminPassword)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func loadEnv(paths ...string) {
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.Trim(strings.TrimSpace(parts[1]), "\"'`")
+				if os.Getenv(key) == "" {
+					os.Setenv(key, val)
+				}
+			}
+		}
+	}
+}
+
 func main() {
+	loadEnv(".env", "../.env")
+
 	httpPortStr := os.Getenv("HTTP_PORT")
 	if httpPortStr == "" {
 		httpPortStr = "17356" // Deterministic dport for skyhook-tunnel-server
@@ -33,6 +77,11 @@ func main() {
 	baseDomain := os.Getenv("DOMAIN")
 	if baseDomain == "" {
 		baseDomain = "skyhook.7u.pl"
+	}
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if adminPassword == "" {
+		adminPassword = "skyhook"
+		log.Printf("⚠️  ADMIN_PASSWORD not set in environment, defaulting to 'skyhook' for local development")
 	}
 
 	quicPort, _ := strconv.Atoi(quicPortStr)
@@ -90,23 +139,145 @@ func main() {
 		log.Printf("[WS] 🔴 Tunnel disconnected: %s", subdomain)
 	})
 
-	// API Telemetry for Vue UI Dashboard
+	// Public Aggregate Telemetry (Hides active tunnel subdomains, URLs, and IPs for privacy)
 	mux.HandleFunc("/api/tunnels", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		tunnels := registry.List()
 		json.NewEncoder(w).Encode(map[string]any{
-			"status":     "online",
-			"domain":     baseDomain,
-			"quic_port":  quicPort,
-			"active_count": len(tunnels),
-			"tunnels":    tunnels,
-			"timestamp":  time.Now().Unix(),
+			"status":       "online",
+			"version":      ServerVersion,
+			"domain":       baseDomain,
+			"quic_port":    quicPort,
+			"active_count": registry.Count(),
+			"timestamp":    time.Now().Unix(),
 		})
 	})
 
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok","service":"skyhook-tunnel"}`))
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":  "ok",
+			"service": "skyhook-tunnel",
+			"version": ServerVersion,
+		})
+	})
+
+	// ----------------------------------------------------
+	// ADMIN API ENDPOINTS (Protected)
+	// ----------------------------------------------------
+
+	// Admin Login Endpoint
+	mux.HandleFunc("/api/admin/login", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"errMethodNotAllowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "errInvalidPayload",
+			})
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(body.Password), []byte(adminPassword)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "errInvalidPassword",
+			})
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     "skyhook_admin_token",
+			Value:    adminPassword,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+			"token":   adminPassword,
+			"version": ServerVersion,
+		})
+	})
+
+	// Admin Logout Endpoint
+	mux.HandleFunc("/api/admin/logout", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		http.SetCookie(w, &http.Cookie{
+			Name:     "skyhook_admin_token",
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+		})
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true,
+		})
+	})
+
+	// Admin Protected Telemetry (Detailed active tunnels with Client IPs and traffic)
+	mux.HandleFunc("/api/admin/tunnels", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if !validateAdminAuth(r, adminPassword) {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "errUnauthorized",
+			})
+			return
+		}
+		tunnels := registry.List()
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":       "online",
+			"version":      ServerVersion,
+			"domain":       baseDomain,
+			"quic_port":    quicPort,
+			"active_count": len(tunnels),
+			"tunnels":      tunnels,
+			"timestamp":    time.Now().Unix(),
+		})
+	})
+
+	// Admin Kill Tunnel Endpoint
+	mux.HandleFunc("/api/admin/tunnels/kill", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if !validateAdminAuth(r, adminPassword) {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "errUnauthorized",
+			})
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"errMethodNotAllowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Subdomain string `json:"subdomain"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Subdomain) == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "errInvalidSubdomain",
+			})
+			return
+		}
+		subdomain := strings.TrimSpace(req.Subdomain)
+		disconnected := registry.Unregister(subdomain)
+		if !disconnected {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": "errTunnelNotFound",
+			})
+			return
+		}
+		log.Printf("[ADMIN] 🛑 Forcibly disconnected tunnel: %s", subdomain)
+		json.NewEncoder(w).Encode(map[string]any{
+			"success":   true,
+			"subdomain": subdomain,
+		})
 	})
 
 	// Static UI File Server (from embedded Vue dist)
