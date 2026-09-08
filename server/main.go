@@ -24,7 +24,7 @@ var embeddedUI embed.FS
 func main() {
 	httpPortStr := os.Getenv("HTTP_PORT")
 	if httpPortStr == "" {
-		httpPortStr = "80"
+		httpPortStr = "17356" // Deterministic dport for skyhook-tunnel-server
 	}
 	quicPortStr := os.Getenv("QUIC_PORT")
 	if quicPortStr == "" {
@@ -160,6 +160,13 @@ func main() {
 			return
 		}
 
+		// Support local subdomains: *.localhost (e.g. "crimson-horizon.localhost")
+		if strings.HasSuffix(host, ".localhost") && host != "localhost" {
+			subdomain := strings.TrimSuffix(host, ".localhost")
+			handleTunnelProxy(w, r, subdomain, registry)
+			return
+		}
+
 		// Also support path-based tunneling: /t/<subdomain>/...
 		if strings.HasPrefix(r.URL.Path, "/t/") {
 			parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/t/"), "/", 2)
@@ -169,6 +176,12 @@ func main() {
 				if len(parts) > 1 {
 					r.URL.Path += parts[1]
 				}
+				http.SetCookie(w, &http.Cookie{
+					Name:     "skyhook_tunnel",
+					Value:    subdomain,
+					Path:     "/",
+					SameSite: http.SameSiteLaxMode,
+				})
 				handleTunnelProxy(w, r, subdomain, registry)
 				return
 			}
@@ -178,6 +191,14 @@ func main() {
 		if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/tunnel_ws") {
 			mux.ServeHTTP(w, r)
 			return
+		}
+
+		// Check cookie or Referer for path-based tunnel asset requests (e.g. /@vite/client, /src/main.js)
+		if cookie, err := r.Cookie("skyhook_tunnel"); err == nil && cookie.Value != "" {
+			if _, exists := registry.Get(cookie.Value); exists && r.URL.Path != "/" && r.URL.Path != "/index.html" {
+				handleTunnelProxy(w, r, cookie.Value, registry)
+				return
+			}
 		}
 
 		// Serve Static Dashboard UI
@@ -212,6 +233,15 @@ func main() {
 }
 
 func handleTunnelProxy(w http.ResponseWriter, r *http.Request, subdomain string, registry *TunnelRegistry) {
+	// Intercept robots.txt to prevent search engine indexing of tunnel endpoints
+	if r.URL.Path == "/robots.txt" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("User-agent: *\nDisallow: /\n"))
+		return
+	}
+
 	// Read request body
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {

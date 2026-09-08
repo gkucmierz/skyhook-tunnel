@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { startTunnel } from '../src/client.js';
+import { generateSubdomain } from '../src/names.js';
 
 const args = process.argv.slice(2);
 
@@ -45,23 +46,9 @@ if (nameIdx !== -1 && args[nameIdx + 1]) {
   customSubdomain = args[nameIdx + 1];
 }
 
-// If no custom name, try reading name from current package.json or generate random
+// If no custom name specified, generate a friendly 2-word random subdomain (e.g. "neon-lagoon")
 if (!customSubdomain) {
-  try {
-    const pkgPath = path.resolve(process.cwd(), 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      if (pkg.name) {
-        customSubdomain = pkg.name.replace(/[^a-zA-Z0-9-]/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
-      }
-    }
-  } catch {
-    // Ignore package.json read errors
-  }
-}
-
-if (!customSubdomain) {
-  customSubdomain = `dev-${crypto.randomBytes(3).toString('hex')}`;
+  customSubdomain = generateSubdomain();
 }
 
 // Parse server
@@ -71,10 +58,14 @@ if (serverIdx !== -1 && args[serverIdx + 1]) {
   serverHost = args[serverIdx + 1];
 }
 
-const isSecure = !args.includes('--no-tls');
+const isLocalhost = serverHost.includes('localhost') || serverHost.includes('127.0.0.1') || serverHost.includes('0.0.0.0');
+if (isLocalhost && !serverHost.includes(':')) {
+  serverHost = `${serverHost}:17356`;
+}
+const isSecure = args.includes('--tls') || (!args.includes('--no-tls') && !isLocalhost);
 
 console.log(`\n\x1b[36m\x1b[1m╔════════════════════════════════════════════════════════════════╗\x1b[0m`);
-console.log(`\x1b[36m\x1b[1m║                   ⚡ SKYHOOK TUNNEL v1.0.0                      ║\x1b[0m`);
+console.log(`\x1b[36m\x1b[1m║                   ⚡ SKYHOOK TUNNEL v1.1.0                      ║\x1b[0m`);
 console.log(`\x1b[36m\x1b[1m╚════════════════════════════════════════════════════════════════╝\x1b[0m`);
 console.log(`  \x1b[90mConnecting to gateway:\x1b[0m ${serverHost} ...`);
 
@@ -84,9 +75,11 @@ startTunnel({
   server: serverHost,
   secure: isSecure,
   onReady: (ack) => {
+    const portPart = serverHost.includes(':') ? `:${serverHost.split(':')[1]}` : '';
+    const displayUrl = isLocalhost ? `http://${ack.subdomain}.localhost${portPart}/` : ack.url;
     console.log(`\n  \x1b[32m✔ Tunnel Online!\x1b[0m\n`);
     console.log(`  \x1b[1mLocal Target:\x1b[0m  http://localhost:${localPort}`);
-    console.log(`  \x1b[1mPublic URL:\x1b[0m    \x1b[36m\x1b[4m${ack.url}\x1b[0m`);
+    console.log(`  \x1b[1mTunnel URL:\x1b[0m    \x1b[36m\x1b[4m${displayUrl}\x1b[0m`);
     console.log(`  \x1b[1mSubdomain:\x1b[0m     ${ack.subdomain}`);
     console.log(`\n  \x1b[90mForwarding incoming web requests to localhost:${localPort}...\x1b[0m`);
     console.log(`  \x1b[90mPress Ctrl+C to close tunnel\x1b[0m\n`);

@@ -1,6 +1,6 @@
 {
   "name": "skyhook-tunnel",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "High-performance QUIC & WebSocket reverse-tunnel and proxy system",
   "type": "module",
@@ -11,7 +11,7 @@
   "scripts": {
     "postinstall": "cd server && go mod tidy || true",
     "dev": "concurrently -n \"SERVER,UI\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:ui\"",
-    "dev:server": "cd server && nodemon -e go --watch . --exec \"go run .\"",
+    "dev:server": "cd server && HTTP_PORT=17356 nodemon -e go --watch . --exec \"go run .\"",
     "dev:ui": "npm --prefix ui run dev",
     "dev:cli": "npm --prefix cli link",
     "tidy": "cd server && go mod tidy",
