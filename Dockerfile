@@ -1,11 +1,11 @@
 # Stage 1: Build Frontend UI
 FROM node:22-alpine AS ui-builder
 WORKDIR /app
+COPY package*.json ./
 COPY ui/package*.json ./ui/
-WORKDIR /app/ui
-RUN npm ci
-COPY ui/ ./
-RUN npm run build
+RUN npm ci --workspace=ui --ignore-scripts
+COPY ui/ ./ui/
+RUN npm run build:ui
 
 # Stage 2: Build Go Server with embedded UI
 FROM golang:1.23-alpine AS server-builder
