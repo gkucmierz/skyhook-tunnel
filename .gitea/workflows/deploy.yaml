@@ -1,0 +1,19 @@
+name: Deploy to Production (DE)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy Skyhook Tunnel to DE Server
+    runs-on: self-hosted-de
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Zero-downtime Docker build & deployment
+        run: |
+          docker compose build
+          docker compose up -d --remove-orphans

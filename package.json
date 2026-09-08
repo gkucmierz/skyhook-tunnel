@@ -1,0 +1,35 @@
+{
+  "name": "skyhook-tunnel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "High-performance QUIC & WebSocket reverse-tunnel and proxy system",
+  "type": "module",
+  "workspaces": [
+    "ui",
+    "cli"
+  ],
+  "scripts": {
+    "postinstall": "cd server && go mod tidy || true",
+    "dev": "concurrently -n \"SERVER,UI\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:ui\"",
+    "dev:server": "cd server && nodemon -e go --watch . --exec \"go run .\"",
+    "dev:ui": "npm --prefix ui run dev",
+    "dev:cli": "npm --prefix cli link",
+    "tidy": "cd server && go mod tidy",
+    "build": "npm run build:ui && npm run build:server",
+    "build:ui": "npm --prefix ui run build",
+    "build:server": "cd server && go build -o bin/server ."
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "nodemon": "^3.1.9"
+  },
+  "keywords": [
+    "tunnel",
+    "quic",
+    "reverse-proxy",
+    "devtools",
+    "cli"
+  ],
+  "author": "gkucmierz",
+  "license": "MIT"
+}

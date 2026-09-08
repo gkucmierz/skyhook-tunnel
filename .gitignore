@@ -1,0 +1,31 @@
+# Node.js dependencies
+node_modules/
+/ui/dist/
+dist/
+!server/dist/
+!server/dist/index.html
+!server/dist/favicon.svg
+server/dist/assets/
+server/dist/*.png
+server/dist/*.jpg
+.vite/
+.vite-temp/
+*.log
+npm-debug.log*
+
+# Go build artifacts
+server/bin/
+server/server
+*.exe
+*.test
+*.out
+
+# Environment & Local Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# OS metadata
+.DS_Store
+Thumbs.db

@@ -1,0 +1,22 @@
+name: skyhook-tunnel
+
+services:
+  skyhook-tunnel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skyhook-tunnel
+    restart: unless-stopped
+    ports:
+      - "4443:4443/udp"
+    environment:
+      - HTTP_PORT=80
+      - QUIC_PORT=4443
+      - DOMAIN=skyhook.7u.pl
+      - WILDCARD_SUFFIX=.skyhook.7u.pl
+    networks:
+      - npm_public
+
+networks:
+  npm_public:
+    external: true

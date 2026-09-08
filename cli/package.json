@@ -1,0 +1,39 @@
+{
+  "name": "@gkucmierz/skyhook",
+  "version": "1.0.0",
+  "description": "Blazing fast reverse-tunnel client for exposing local servers to the web",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "bin",
+    "src",
+    "index.js"
+  ],
+  "bin": {
+    "skyhook": "./bin/skyhook.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "keywords": [
+    "tunnel",
+    "reverse-proxy",
+    "quic",
+    "websocket",
+    "port",
+    "expose",
+    "cli"
+  ],
+  "author": "gkucmierz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitea.7u.pl/gkucmierz/skyhook-tunnel.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

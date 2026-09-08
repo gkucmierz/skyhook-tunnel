@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="128" fill="#07090e" />
+  <circle cx="256" cy="256" r="230" stroke="#1e293b" stroke-width="2" stroke-dasharray="8 12" />
+  
+  <!-- Upper Orbital Portal Ring -->
+  <circle cx="340" cy="150" r="48" stroke="url(#purpleGrad)" stroke-width="12" filter="url(#glowPurple)" />
+  <circle cx="340" cy="150" r="20" fill="#a855f7" opacity="0.4" />
+  
+  <!-- Lower Node Point -->
+  <circle cx="160" cy="360" r="28" stroke="#38bdf8" stroke-width="8" filter="url(#glowCyan)" />
+  <circle cx="160" cy="360" r="12" fill="#38bdf8" />
+  
+  <!-- S-Curve Tether Conduit -->
+  <path d="M 160 360 C 160 440, 310 440, 340 360 C 370 280, 160 250, 190 170 C 215 105, 300 110, 340 150" 
+        stroke="url(#skyhookGrad)" 
+        stroke-width="18" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
+        filter="url(#glowMain)" />
+        
+  <!-- Core Inner Beam -->
+  <path d="M 160 360 C 160 440, 310 440, 340 360 C 370 280, 160 250, 190 170 C 215 105, 300 110, 340 150" 
+        stroke="#ffffff" 
+        stroke-width="6" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
+        opacity="0.8" />
+
+  <defs>
+    <linearGradient id="skyhookGrad" x1="160" y1="400" x2="360" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="45%" stop-color="#38bdf8" />
+      <stop offset="75%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="300" y1="100" x2="390" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ec4899" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+    <filter id="glowMain" x="50" y="50" width="412" height="412" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="glowCyan" x="120" y="320" width="80" height="80" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="glowPurple" x="280" y="90" width="120" height="120" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+</svg>
