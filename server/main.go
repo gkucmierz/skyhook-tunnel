@@ -113,7 +113,21 @@ func main() {
 	var fileServer http.Handler
 	distFS, err := fs.Sub(embeddedUI, "dist")
 	if err == nil {
-		fileServer = http.FileServer(http.FS(distFS))
+		fsServer := http.FileServer(http.FS(distFS))
+		fileServer = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := strings.TrimPrefix(r.URL.Path, "/")
+			if path == "" {
+				path = "index.html"
+			}
+			f, err := distFS.Open(path)
+			if err != nil {
+				// Fallback to index.html for SPA routing
+				r.URL.Path = "/"
+			} else {
+				f.Close()
+			}
+			fsServer.ServeHTTP(w, r)
+		})
 	} else {
 		// Fallback for local development when dist is not yet built
 		fileServer = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,11 +174,14 @@ func main() {
 			}
 		}
 
-		// Otherwise, serve API or Static Dashboard UI
-		mux.ServeHTTP(w, r)
-		if !strings.HasPrefix(r.URL.Path, "/api") && !strings.HasPrefix(r.URL.Path, "/tunnel_ws") {
-			fileServer.ServeHTTP(w, r)
+		// Serve API and WebSocket endpoints
+		if strings.HasPrefix(r.URL.Path, "/api") || strings.HasPrefix(r.URL.Path, "/tunnel_ws") {
+			mux.ServeHTTP(w, r)
+			return
 		}
+
+		// Serve Static Dashboard UI
+		fileServer.ServeHTTP(w, r)
 	})
 
 	server := &http.Server{
