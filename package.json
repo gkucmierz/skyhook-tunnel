@@ -17,7 +17,9 @@
     "tidy": "cd server && go mod tidy",
     "build": "npm run build:ui && npm run build:server",
     "build:ui": "npm --prefix ui run build",
-    "build:server": "cd server && go build -o bin/server ."
+    "build:server": "cd server && go build -o bin/server .",
+    "publish:cli": "npm publish ./cli --access public",
+    "publish:cli:gitea": "npm publish ./cli --registry https://gitea.7u.pl/api/packages/gkucmierz/npm/"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

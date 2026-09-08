@@ -10,10 +10,12 @@
     "index.js"
   ],
   "bin": {
-    "skyhook": "./bin/skyhook.js"
+    "skyhook": "bin/skyhook.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "publish:npm": "npm publish --access public",
+    "publish:gitea": "npm publish --registry https://gitea.7u.pl/api/packages/gkucmierz/npm/",
+    "test": "node bin/skyhook.js --help"
   },
   "dependencies": {
     "ws": "^8.18.0"
@@ -31,8 +33,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://gitea.7u.pl/gkucmierz/skyhook-tunnel.git"
+    "url": "https://gitea.7u.pl/gkucmierz/skyhook-tunnel.git"
   },
+  "homepage": "https://gitea.7u.pl/gkucmierz/skyhook-tunnel",
   "publishConfig": {
     "access": "public"
   }
