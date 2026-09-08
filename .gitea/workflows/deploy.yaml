@@ -17,3 +17,37 @@ jobs:
         run: |
           docker compose build
           docker compose up -d --remove-orphans
+
+  publish:
+    name: Publish CLI Package (Gitea + NPM)
+    runs-on: self-hosted-de
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      # -------------- PUBLISH TO GITEA PACKAGES --------------
+      - name: Setup Node for Gitea Packages
+        uses: actions/setup-node@v3
+        with:
+          registry-url: 'https://gitea.7u.pl/api/packages/gkucmierz/npm/'
+          scope: '@gkucmierz'
+
+      - name: Publish to Gitea Packages Registry
+        run: |
+          cd cli
+          npm publish || echo "Version already published to Gitea, skipping."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.LOCAL_PACKAGE_REGISTRY || secrets.GITHUB_TOKEN }}
+
+      # -------------- PUBLISH TO NPMJS.ORG -------------------
+      - name: Setup Node for NPM Registry
+        uses: actions/setup-node@v3
+        with:
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to Native Global Registry
+        run: |
+          cd cli
+          npm publish --access public || echo "Version already published to NPM, skipping."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
