@@ -21,7 +21,7 @@ const stats = ref({
   domain: 'skyhook.7u.pl',
   quic_port: 4443,
   status: 'online',
-  version: '1.2.0',
+  version: '1.2.1',
 });
 const isLoadingTelemetry = ref(false);
 let pollTimer = null;
@@ -116,7 +116,7 @@ async function fetchTelemetry() {
       domain: data.domain || 'skyhook.7u.pl',
       quic_port: data.quic_port || 4443,
       status: data.status || 'online',
-      version: data.version || '1.2.0',
+      version: data.version || '1.2.1',
     };
   } catch {
     // Graceful telemetry retry

@@ -1,6 +1,6 @@
 {
   "name": "@gkucmierz/skyhook",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Blazing fast reverse-tunnel client for exposing local servers to the web",
   "type": "module",
   "main": "index.js",

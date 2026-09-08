@@ -12,32 +12,60 @@ Official web portal and live telemetry dashboard: [https://skyhook.7u.pl/](https
 
 ## 🚀 Quickstart
 
-### 1. Zero Installation (via npx)
+### 1. Deterministic Port Forwarding (via `@gkucmierz/dport`)
 
-Expose your local server in seconds without installing anything:
+No need to memorize arbitrary port numbers! Skyhook natively integrates with `@gkucmierz/dport`:
 
 ```bash
-npx @gkucmierz/skyhook 3000
+# Pass project name - Skyhook calculates dport and assigns the subdomain automatically:
+npx @gkucmierz/skyhook tv-pilot
 ```
 
-### 2. Custom Subdomain
+➔ Instant HTTPS URL: `https://tv-pilot.skyhook.7u.pl/` ➔ `http://127.0.0.1:51206`
+
+### 2. Auto-Discovery in Current Directory
+
+Run directly inside any project folder containing a `package.json`:
+
+```bash
+# Auto-detects project name from package.json and calculates its dport:
+npx @gkucmierz/skyhook
+# or explicitly:
+npx @gkucmierz/skyhook -d
+```
+
+### 3. Raw Port or Full URL Forwarding
+
+Expose standard port numbers or paste full URLs directly from your browser/clipboard:
+
+```bash
+# Forward raw port (generates a friendly 2-word subdomain like "neon-lagoon"):
+npx @gkucmierz/skyhook 3000
+
+# Forward full URL:
+npx @gkucmierz/skyhook http://localhost:34200/
+```
+
+### 4. Custom Subdomain
 
 Assign a persistent, memorable subdomain on `*.skyhook.7u.pl`:
 
 ```bash
 npx @gkucmierz/skyhook 34200 --name bravia
+# or with dport project:
+npx @gkucmierz/skyhook tv-pilot --name remote-pilot
 ```
 
-➔ Instant HTTPS URL: `https://bravia.skyhook.7u.pl/`
+➔ Instant HTTPS URL: `https://remote-pilot.skyhook.7u.pl/`
 
-### 3. Global Installation
+### 5. Global Installation
 
 ```bash
 npm install -g @gkucmierz/skyhook
-skyhook 3000
+skyhook tv-pilot
 ```
 
-### 4. Integration with `package.json`
+### 6. Integration with `package.json`
 
 Add a convenient `tunnel` script alongside your dev server:
 
@@ -45,7 +73,7 @@ Add a convenient `tunnel` script alongside your dev server:
 {
   "scripts": {
     "dev": "vite",
-    "tunnel": "skyhook 34200"
+    "tunnel": "skyhook -d"
   }
 }
 ```
@@ -56,9 +84,12 @@ Add a convenient `tunnel` script alongside your dev server:
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `[port]` | Local application port to forward | Auto-detected from `package.json` or interactive |
-| `--name <subdomain>` | Custom subdomain name on `*.skyhook.7u.pl` | Random 7-character ID |
-| `--server <host>` | Custom Skyhook gateway host | `skyhook.7u.pl` |
+| `[port \| project \| url]` | Port number (`3000`), dport project name (`tv-pilot`), or full URL | Auto-detected from `package.json` |
+| `--dport, -d [project]` | Calculate deterministic port using `@gkucmierz/dport` | Current `package.json` name |
+| `--name, -n <subdomain>` | Custom subdomain name on `*.skyhook.7u.pl` | Project name or random 2-word phrase |
+| `--server, -s <host>` | Gateway server hostname or URL | `skyhook.7u.pl` |
+| `--no-tls` | Connect using unencrypted `ws://` (for local dev) | — |
+| `--version, -v` | Print Skyhook CLI version | — |
 | `-h, --help` | Display help and usage information | — |
 
 ---

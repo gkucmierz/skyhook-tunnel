@@ -18,8 +18,10 @@
 - **QUIC Transport (HTTP/3 UDP :4443):** Eliminates TCP Head-of-Line (HoL) blocking. Lost packets on home Wi-Fi do not stall concurrent streams.
 - **WebSocket over TLS (WSS :443) Fallback:** Automatic failover through Nginx Proxy Manager if UDP is blocked by strict firewalls.
 - **Wildcard Subdomains:** Automatic routing for `https://<subdomain>.skyhook.7u.pl/` backed by a Let's Encrypt Wildcard certificate.
+- **Deterministic Port Forwarding (`@gkucmierz/dport`):** Pass project names (e.g. `tv-pilot`) instead of remembering raw port numbers. Skyhook calculates the port and auto-assigns the subdomain!
 - **NPM Package (`@gkucmierz/skyhook`):** Run instantly via `npx` with zero installation required, identical to `@gkucmierz/dport`.
 - **Integrated Documentation & Live Telemetry:** Interactive web portal and live tunnel dashboard at [https://skyhook.7u.pl/](https://skyhook.7u.pl/).
+- **Protected Admin Panel (`/admin`):** Authenticated view of active tunnels, client IPs, traffic telemetry, and instant session termination kill-switch.
 - **Bilingual Interface (PL / EN):** Instant reactive switching between Polish and English with persistent selection stored in `localStorage`.
 - **Ecosystem Analytics (`analytics.7u.pl`):** Built-in telemetry tracking real sessions, pageviews, and connection metrics.
 
@@ -27,30 +29,51 @@
 
 ## 🚀 Quickstart
 
-### 1. Run instantly via npx (Zero install)
+### 1. Deterministic Port Forwarding (via `@gkucmierz/dport`)
 ```bash
-npx @gkucmierz/skyhook 34200
+# Pass project name - Skyhook calculates dport and assigns the subdomain automatically:
+npx @gkucmierz/skyhook tv-pilot
+```
+➔ Public URL: `https://tv-pilot.skyhook.7u.pl/` ➔ `http://127.0.0.1:51206`
+
+### 2. Auto-Discovery in Current Directory
+```bash
+# Run inside any project directory to auto-detect its name from package.json:
+npx @gkucmierz/skyhook
+# or explicitly:
+npx @gkucmierz/skyhook -d
 ```
 
-### 2. Specify a custom memorable subdomain
+### 3. Run with raw port or full URL
+```bash
+# Raw port number:
+npx @gkucmierz/skyhook 34200
+
+# Full URL from browser/clipboard:
+npx @gkucmierz/skyhook http://localhost:34200/
+```
+
+### 4. Specify a custom memorable subdomain
 ```bash
 npx @gkucmierz/skyhook 34200 --name bravia
+# or with dport project:
+npx @gkucmierz/skyhook tv-pilot --name remote-pilot
 ```
-➔ Public URL: `https://bravia.skyhook.7u.pl/`
+➔ Public URL: `https://remote-pilot.skyhook.7u.pl/`
 
-### 3. Global installation
+### 5. Global installation
 ```bash
 npm install -g @gkucmierz/skyhook
-skyhook 3000
+skyhook tv-pilot
 ```
 
-### 4. Integration with `package.json`
+### 6. Integration with `package.json`
 Add a script to your project:
 ```json
 {
   "scripts": {
     "dev": "vite",
-    "tunnel": "skyhook 34200"
+    "tunnel": "skyhook -d"
   }
 }
 ```

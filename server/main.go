@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const ServerVersion = "1.2.0"
+const ServerVersion = "1.2.1"
 
 //go:embed all:dist
 var embeddedUI embed.FS
