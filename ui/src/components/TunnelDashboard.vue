@@ -10,10 +10,30 @@ const stats = ref({
   domain: 'skyhook.7u.pl',
   quic_port: 4443,
   status: 'online',
+  telemetry: null,
 });
 const isLoading = ref(true);
 
 let pollTimer = null;
+
+function getMaxTunnels() {
+  if (!stats.value.telemetry?.daily_history) return 1;
+  const max = Math.max(...stats.value.telemetry.daily_history.map(d => d.tunnels), 1);
+  return max;
+}
+
+function getBarHeight(count) {
+  const max = getMaxTunnels();
+  if (count === 0) return '6px';
+  const pct = Math.max(Math.round((count / max) * 100), 12);
+  return `${pct}%`;
+}
+
+function formatBarDate(dateStr) {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  return parts.length === 3 ? `${parts[1]}/${parts[2]}` : dateStr;
+}
 
 async function fetchTelemetry() {
   try {
@@ -25,6 +45,7 @@ async function fetchTelemetry() {
       domain: data.domain || 'skyhook.7u.pl',
       quic_port: data.quic_port || 4443,
       status: data.status || 'online',
+      telemetry: data.telemetry || null,
     };
   } catch {
     // If backend is not running or dev mode without proxy
@@ -141,6 +162,70 @@ onUnmounted(() => {
         <h3>{{ t('dashboard.empty.title') }}</h3>
         <p>{{ t('dashboard.empty.desc') }}</p>
         <code>npx @gkucmierz/skyhook 34200 --name test</code>
+      </div>
+    </div>
+
+    <!-- Persistent Telemetry & Activity Section -->
+    <div v-if="stats.telemetry" class="telemetry-box glass-panel">
+      <div class="telemetry-header">
+        <span class="box-title">{{ t('dashboard.telemetry.sectionTitle') }}</span>
+        <span class="telemetry-sub">{{ t('dashboard.telemetry.sectionDesc') }}</span>
+      </div>
+
+      <!-- Telemetry Cards Grid -->
+      <div class="telemetry-grid">
+        <div class="telemetry-card">
+          <span class="telemetry-card-label">{{ t('dashboard.telemetry.last24h') }}</span>
+          <div class="telemetry-card-val highlight-cyan">
+            {{ stats.telemetry.last_24h.tunnels }} <span class="telemetry-unit">{{ t('dashboard.telemetry.tunnels') }}</span>
+          </div>
+          <span class="telemetry-card-sub">{{ stats.telemetry.last_24h.requests }} {{ t('dashboard.telemetry.requests') }}</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="telemetry-card-label">{{ t('dashboard.telemetry.last7d') }}</span>
+          <div class="telemetry-card-val highlight-green">
+            {{ stats.telemetry.last_7d.tunnels }} <span class="telemetry-unit">{{ t('dashboard.telemetry.tunnels') }}</span>
+          </div>
+          <span class="telemetry-card-sub">{{ stats.telemetry.last_7d.requests }} {{ t('dashboard.telemetry.requests') }}</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="telemetry-card-label">{{ t('dashboard.telemetry.last30d') }}</span>
+          <div class="telemetry-card-val highlight-purple">
+            {{ stats.telemetry.last_30d.tunnels }} <span class="telemetry-unit">{{ t('dashboard.telemetry.tunnels') }}</span>
+          </div>
+          <span class="telemetry-card-sub">{{ stats.telemetry.last_30d.requests }} {{ t('dashboard.telemetry.requests') }}</span>
+        </div>
+
+        <div class="telemetry-card">
+          <span class="telemetry-card-label">{{ t('dashboard.telemetry.allTime') }}</span>
+          <div class="telemetry-card-val highlight-amber">
+            {{ stats.telemetry.all_time.tunnels }} <span class="telemetry-unit">{{ t('dashboard.telemetry.tunnels') }}</span>
+          </div>
+          <span class="telemetry-card-sub">{{ stats.telemetry.all_time.requests }} {{ t('dashboard.telemetry.requests') }}</span>
+        </div>
+      </div>
+
+      <!-- Activity Sparkline / Bars -->
+      <div v-if="stats.telemetry.daily_history && stats.telemetry.daily_history.length > 0" class="activity-section">
+        <span class="activity-title">{{ t('dashboard.telemetry.activity') }}</span>
+        <div class="activity-bars">
+          <div
+            v-for="day in stats.telemetry.daily_history"
+            :key="day.date"
+            class="activity-bar-col"
+          >
+            <div class="bar-track">
+              <div
+                class="bar-fill"
+                :style="{ height: getBarHeight(day.tunnels) }"
+              ></div>
+            </div>
+            <span class="bar-date">{{ formatBarDate(day.date) }}</span>
+            <span class="bar-val">{{ day.tunnels }}</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -436,5 +521,153 @@ onUnmounted(() => {
   background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(168, 85, 247, 0.35));
   border-color: var(--accent-cyan);
   transform: translateY(-1px);
+}
+
+/* Telemetry & Historical Activity */
+.telemetry-box {
+  margin-top: 32px;
+  padding: 24px;
+}
+
+.telemetry-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+
+.telemetry-sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.telemetry-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.telemetry-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.telemetry-card-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.telemetry-card-val {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.telemetry-unit {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-left: 2px;
+}
+
+.telemetry-card-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.highlight-amber {
+  color: #fbbf24;
+}
+
+/* Sparkline / Daily Activity Bars */
+.activity-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 20px;
+}
+
+.activity-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+}
+
+.activity-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 120px;
+  padding: 0 4px 4px;
+}
+
+.activity-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-width: 32px;
+  gap: 6px;
+}
+
+.bar-track {
+  flex: 1;
+  width: 100%;
+  max-width: 44px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px 6px 0 0;
+  display: flex;
+  align-items: flex-end;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, #38bdf8 0%, rgba(56, 189, 248, 0.35) 100%);
+  border-radius: 5px 5px 0 0;
+  transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+}
+
+.bar-track:hover .bar-fill {
+  background: linear-gradient(180deg, #67e8f9 0%, rgba(56, 189, 248, 0.6) 100%);
+}
+
+.bar-date {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bar-val {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  user-select: none;
+  -webkit-user-select: none;
 }
 </style>

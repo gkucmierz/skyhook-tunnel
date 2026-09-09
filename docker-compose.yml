@@ -15,8 +15,14 @@ services:
       - DOMAIN=skyhook.7u.pl
       - WILDCARD_SUFFIX=.skyhook.7u.pl
       - ADMIN_PASSWORD=${SKYHOOK_ADMIN_PASSWORD}
+      - DATA_PATH=/data/telemetry.json
+    volumes:
+      - skyhook_data:/data
     networks:
       - npm_public
+
+volumes:
+  skyhook_data:
 
 networks:
   npm_public:

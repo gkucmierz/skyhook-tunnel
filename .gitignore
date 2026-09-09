@@ -29,3 +29,7 @@ server/server
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Runtime data
+server/data/
+data/

@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/skyhook-server .
 
 # Stage 3: Minimal production runtime
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata && mkdir -p /data
 WORKDIR /app
 COPY --from=server-builder /app/skyhook-server /app/skyhook-server
 
@@ -30,5 +30,6 @@ EXPOSE 4443/udp
 ENV HTTP_PORT=80
 ENV QUIC_PORT=4443
 ENV DOMAIN=skyhook.7u.pl
+ENV DATA_PATH=/data/telemetry.json
 
 CMD ["/app/skyhook-server"]
