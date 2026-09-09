@@ -173,9 +173,7 @@ func (s *WsTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, re
 			res := pkt.Response
 			for k, vv := range res.Headers {
 				for _, v := range vv {
-					if strings.EqualFold(k, "Location") {
-						v = rewriteLocationHeader(v, r.Host, scheme)
-					}
+					v = rewriteResponseHeader(k, v, r.Host, scheme)
 					w.Header().Add(k, v)
 				}
 			}
@@ -194,9 +192,7 @@ func (s *WsTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, re
 			start := pkt.StreamStart
 			for k, vv := range start.Headers {
 				for _, v := range vv {
-					if strings.EqualFold(k, "Location") {
-						v = rewriteLocationHeader(v, r.Host, scheme)
-					}
+					v = rewriteResponseHeader(k, v, r.Host, scheme)
 					w.Header().Add(k, v)
 				}
 			}

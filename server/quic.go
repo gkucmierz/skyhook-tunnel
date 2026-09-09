@@ -77,9 +77,7 @@ func (s *QuicTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, 
 	}
 	for k, vv := range res.Headers {
 		for _, v := range vv {
-			if strings.EqualFold(k, "Location") {
-				v = rewriteLocationHeader(v, r.Host, scheme)
-			}
+			v = rewriteResponseHeader(k, v, r.Host, scheme)
 			w.Header().Add(k, v)
 		}
 	}

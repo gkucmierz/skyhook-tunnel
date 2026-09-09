@@ -282,3 +282,147 @@ func TestRewriteLocationHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestRewriteCorsOrigin(t *testing.T) {
+	tests := []struct {
+		input    string
+		host     string
+		scheme   string
+		expected string
+	}{
+		{
+			input:    "http://127.0.0.1:3000",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356",
+		},
+		{
+			input:    "http://localhost:5173",
+			host:     "cool-star.skyhook.7u.pl",
+			scheme:   "https",
+			expected: "https://cool-star.skyhook.7u.pl",
+		},
+		{
+			input:    "http://0.0.0.0:8080",
+			host:     "my-app.localhost:17356",
+			scheme:   "http",
+			expected: "http://my-app.localhost:17356",
+		},
+		{
+			input:    "*",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "*",
+		},
+		{
+			input:    "https://example.com",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "https://example.com",
+		},
+		{
+			input:    "",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "",
+		},
+	}
+
+	for _, tc := range tests {
+		actual := rewriteCorsOrigin(tc.input, tc.host, tc.scheme)
+		if actual != tc.expected {
+			t.Errorf("rewriteCorsOrigin(%q) = %q; want %q", tc.input, actual, tc.expected)
+		}
+	}
+}
+
+func TestRewriteResponseHeader(t *testing.T) {
+	tests := []struct {
+		key      string
+		val      string
+		host     string
+		scheme   string
+		expected string
+	}{
+		{
+			key:      "Location",
+			val:      "http://127.0.0.1:3000/auth",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356/auth",
+		},
+		{
+			key:      "Access-Control-Allow-Origin",
+			val:      "http://127.0.0.1:3000",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356",
+		},
+		{
+			key:      "Access-Control-Allow-Origin",
+			val:      "*",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "*",
+		},
+		{
+			key:      "Content-Type",
+			val:      "application/json",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "application/json",
+		},
+	}
+
+	for _, tc := range tests {
+		actual := rewriteResponseHeader(tc.key, tc.val, tc.host, tc.scheme)
+		if actual != tc.expected {
+			t.Errorf("rewriteResponseHeader(%q, %q) = %q; want %q", tc.key, tc.val, actual, tc.expected)
+		}
+	}
+}
+
+func TestCopyAndInjectProxyHeaders(t *testing.T) {
+	// Case 1: Standard HTTP request with no existing proxy headers
+	r1, _ := http.NewRequest("GET", "http://rapid-island.localhost:17356/api/data", nil)
+	r1.RemoteAddr = "192.168.1.100:54321"
+	r1.Header.Set("User-Agent", "TestClient")
+
+	h1 := copyAndInjectProxyHeaders(r1)
+	if len(h1["User-Agent"]) == 0 || h1["User-Agent"][0] != "TestClient" {
+		t.Errorf("expected User-Agent preserved, got %v", h1["User-Agent"])
+	}
+	if len(h1["X-Forwarded-For"]) == 0 || h1["X-Forwarded-For"][0] != "192.168.1.100" {
+		t.Errorf("expected X-Forwarded-For 192.168.1.100, got %v", h1["X-Forwarded-For"])
+	}
+	if len(h1["X-Forwarded-Host"]) == 0 || h1["X-Forwarded-Host"][0] != "rapid-island.localhost:17356" {
+		t.Errorf("expected X-Forwarded-Host rapid-island.localhost:17356, got %v", h1["X-Forwarded-Host"])
+	}
+	if len(h1["X-Forwarded-Proto"]) == 0 || h1["X-Forwarded-Proto"][0] != "http" {
+		t.Errorf("expected X-Forwarded-Proto http, got %v", h1["X-Forwarded-Proto"])
+	}
+	if len(h1["X-Forwarded-Port"]) == 0 || h1["X-Forwarded-Port"][0] != "17356" {
+		t.Errorf("expected X-Forwarded-Port 17356, got %v", h1["X-Forwarded-Port"])
+	}
+	if len(h1["X-Real-Ip"]) == 0 || h1["X-Real-Ip"][0] != "192.168.1.100" {
+		t.Errorf("expected X-Real-Ip 192.168.1.100, got %v", h1["X-Real-Ip"])
+	}
+
+	// Case 2: HTTPS behind upstream reverse proxy with existing X-Forwarded-For
+	r2, _ := http.NewRequest("GET", "https://cool-star.skyhook.7u.pl/auth", nil)
+	r2.RemoteAddr = "10.0.0.5:12345"
+	r2.Header.Set("X-Forwarded-For", "203.0.113.195")
+	r2.Header.Set("X-Forwarded-Proto", "https")
+
+	h2 := copyAndInjectProxyHeaders(r2)
+	if len(h2["X-Forwarded-For"]) == 0 || h2["X-Forwarded-For"][0] != "203.0.113.195, 10.0.0.5" {
+		t.Errorf("expected appended X-Forwarded-For, got %v", h2["X-Forwarded-For"])
+	}
+	if len(h2["X-Forwarded-Proto"]) == 0 || h2["X-Forwarded-Proto"][0] != "https" {
+		t.Errorf("expected X-Forwarded-Proto https, got %v", h2["X-Forwarded-Proto"])
+	}
+	if len(h2["X-Forwarded-Port"]) == 0 || h2["X-Forwarded-Port"][0] != "443" {
+		t.Errorf("expected X-Forwarded-Port 443, got %v", h2["X-Forwarded-Port"])
+	}
+}
+

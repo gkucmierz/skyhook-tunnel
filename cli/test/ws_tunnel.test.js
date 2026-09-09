@@ -113,3 +113,89 @@ test('WebSocket tunneling forwards messages and closes cleanly', async (t) => {
   await new Promise((resolve) => localHttpServer.close(resolve));
   await new Promise((resolve) => gatewayHttpServer.close(resolve));
 });
+
+test('HTTP request propagates X-Forwarded headers and sets local Host', async (t) => {
+  let receivedHeaders = null;
+  const localHttpServer = http.createServer((req, res) => {
+    receivedHeaders = req.headers;
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': 'http://127.0.0.1:3000',
+    });
+    res.end(JSON.stringify({ status: 'ok' }));
+  });
+
+  await new Promise((resolve) => localHttpServer.listen(0, '127.0.0.1', resolve));
+  const localPort = localHttpServer.address().port;
+
+  const gatewayHttpServer = http.createServer();
+  const gatewayWss = new WebSocketServer({ server: gatewayHttpServer });
+
+  const receivedPackets = [];
+  const clientWsPromise = new Promise((resolve) => {
+    gatewayWss.on('connection', (socket) => {
+      socket.on('message', (raw) => {
+        receivedPackets.push(JSON.parse(raw.toString()));
+      });
+      resolve(socket);
+    });
+  });
+
+  await new Promise((resolve) => gatewayHttpServer.listen(0, '127.0.0.1', resolve));
+  const gatewayPort = gatewayHttpServer.address().port;
+
+  const tunnel = startTunnel({
+    port: localPort,
+    localHost: '127.0.0.1',
+    subdomain: 'header-test',
+    server: `127.0.0.1:${gatewayPort}`,
+    secure: false,
+    onError: (err) => console.error('tunnel client error:', err),
+  });
+
+  const gatewayClientWs = await clientWsPromise;
+  gatewayClientWs.send(JSON.stringify({
+    type: 'REGISTER_ACK',
+    ack: { success: true, subdomain: 'header-test', url: 'http://header-test.localhost:17356' },
+  }));
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  // Send REQUEST packet with X-Forwarded headers
+  gatewayClientWs.send(JSON.stringify({
+    type: 'REQUEST',
+    request: {
+      stream_id: 'req-header-1',
+      method: 'GET',
+      url: '/api/test',
+      headers: {
+        'User-Agent': ['TestProxy/1.0'],
+        'X-Forwarded-For': ['198.51.100.1'],
+        'X-Forwarded-Host': ['header-test.localhost:17356'],
+        'X-Forwarded-Proto': ['http'],
+        'X-Forwarded-Port': ['17356'],
+        'X-Real-Ip': ['198.51.100.1'],
+      },
+    },
+  }));
+
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  assert.ok(receivedHeaders, 'Local server should have received request');
+  assert.equal(receivedHeaders['x-forwarded-for'], '198.51.100.1');
+  assert.equal(receivedHeaders['x-forwarded-host'], 'header-test.localhost:17356');
+  assert.equal(receivedHeaders['x-forwarded-proto'], 'http');
+  assert.equal(receivedHeaders['x-forwarded-port'], '17356');
+  assert.equal(receivedHeaders['x-real-ip'], '198.51.100.1');
+  assert.equal(receivedHeaders['host'], `127.0.0.1:${localPort}`);
+
+  const resPkt = receivedPackets.find((p) => p.type === 'RESPONSE' && p.response?.stream_id === 'req-header-1');
+  assert.ok(resPkt, 'Gateway should receive RESPONSE packet');
+  assert.equal(resPkt.response.status_code, 200);
+
+  tunnel.close();
+  gatewayWss.close();
+  await new Promise((resolve) => localHttpServer.close(resolve));
+  await new Promise((resolve) => gatewayHttpServer.close(resolve));
+});
+

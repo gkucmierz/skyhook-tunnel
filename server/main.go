@@ -450,8 +450,17 @@ func copyAndInjectProxyHeaders(r *http.Request) map[string][]string {
 		headers["X-Forwarded-For"] = []string{remoteIP}
 	}
 
+	port := "80"
+	if scheme == "https" {
+		port = "443"
+	}
+	if colon := strings.LastIndex(r.Host, ":"); colon != -1 {
+		port = r.Host[colon+1:]
+	}
+
 	headers["X-Forwarded-Host"] = []string{r.Host}
 	headers["X-Forwarded-Proto"] = []string{scheme}
+	headers["X-Forwarded-Port"] = []string{port}
 	headers["X-Real-Ip"] = []string{remoteIP}
 
 	return headers
@@ -661,3 +670,24 @@ func rewriteLocationHeader(rawLocation, publicHost, scheme string) string {
 	}
 	return rawLocation
 }
+
+func rewriteCorsOrigin(originHeader, publicHost, scheme string) string {
+	if originHeader == "" || originHeader == "*" {
+		return originHeader
+	}
+	if localRedirectRegex.MatchString(originHeader) {
+		return fmt.Sprintf("%s://%s", scheme, publicHost)
+	}
+	return originHeader
+}
+
+func rewriteResponseHeader(key, val, publicHost, scheme string) string {
+	if strings.EqualFold(key, "Location") {
+		return rewriteLocationHeader(val, publicHost, scheme)
+	}
+	if strings.EqualFold(key, "Access-Control-Allow-Origin") {
+		return rewriteCorsOrigin(val, publicHost, scheme)
+	}
+	return val
+}
+
