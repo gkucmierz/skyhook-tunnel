@@ -280,19 +280,21 @@ export function startTunnel({
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
-              if (ws.readyState === WebSocket.OPEN) {
+              if (ws.readyState !== WebSocket.OPEN) break;
+
+              const chunks = splitIntoChunks(Buffer.from(value), 64 * 1024);
+              for (const chunk of chunks) {
+                if (ws.readyState !== WebSocket.OPEN) break;
                 ws.send(
                   JSON.stringify({
                     type: 'STREAM_CHUNK',
                     stream_chunk: {
                       stream_id: req.stream_id,
-                      data: Buffer.from(value).toString('base64'),
+                      data: chunk.toString('base64'),
                       is_binary: true,
                     },
                   })
                 );
-              } else {
-                break;
               }
             }
           } finally {
@@ -435,4 +437,14 @@ export function rewriteLocation(locationHeader, localHost, port) {
     return locationHeader;
   }
 }
+
+export function splitIntoChunks(buffer, chunkSize = 64 * 1024) {
+  if (!buffer || buffer.length === 0) return [];
+  const chunks = [];
+  for (let offset = 0; offset < buffer.length; offset += chunkSize) {
+    chunks.push(buffer.subarray(offset, Math.min(offset + chunkSize, buffer.length)));
+  }
+  return chunks;
+}
+
 

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -601,5 +604,25 @@ func TestWsTunnelSession_Streaming(t *testing.T) {
 		t.Errorf("expected X-Accel-Buffering: no for SSE, got %q", w.Header().Get("X-Accel-Buffering"))
 	}
 }
+
+func TestMaxRequestBodyLimit(t *testing.T) {
+	limit := int64(1024) // 1 KB limit for testing
+	largeData := make([]byte, 2048)
+
+	r, _ := http.NewRequest("POST", "http://localhost/upload", strings.NewReader(string(largeData)))
+	w := newMockFlushingWriter()
+
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	_, err := io.ReadAll(r.Body)
+	if err == nil {
+		t.Fatalf("expected error reading beyond MaxBytesReader limit, got nil")
+	}
+
+	var maxBytesErr *http.MaxBytesError
+	if !errors.As(err, &maxBytesErr) {
+		t.Errorf("expected *http.MaxBytesError, got %T: %v", err, err)
+	}
+}
+
 
 

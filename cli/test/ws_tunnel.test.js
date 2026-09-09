@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { startTunnel, rewriteLocation } from '../src/client.js';
+import { startTunnel, rewriteLocation, splitIntoChunks } from '../src/client.js';
 
 test('WebSocket tunneling forwards messages and closes cleanly', async (t) => {
   // 1. Setup local target server with WebSocket support
@@ -222,5 +222,36 @@ test('rewriteLocation converts local redirects to relative paths', () => {
     assert.equal(actual, tc.expected, `rewriteLocation("${tc.input}")`);
   }
 });
+
+test('splitIntoChunks correctly partitions large payloads without data corruption', () => {
+  // Case 1: Buffer smaller than chunk size
+  const smallBuf = Buffer.from('hello world');
+  const smallChunks = splitIntoChunks(smallBuf, 64);
+  assert.equal(smallChunks.length, 1);
+  assert.equal(smallChunks[0].toString(), 'hello world');
+
+  // Case 2: Buffer exactly matching chunk size
+  const exactBuf = Buffer.alloc(100, 'A');
+  const exactChunks = splitIntoChunks(exactBuf, 100);
+  assert.equal(exactChunks.length, 1);
+  assert.equal(exactChunks[0].length, 100);
+
+  // Case 3: Buffer larger than chunk size (150 KB split into 64 KB chunks)
+  const largeBuf = Buffer.alloc(150 * 1024, 'X');
+  const largeChunks = splitIntoChunks(largeBuf, 64 * 1024);
+  assert.equal(largeChunks.length, 3);
+  assert.equal(largeChunks[0].length, 64 * 1024);
+  assert.equal(largeChunks[1].length, 64 * 1024);
+  assert.equal(largeChunks[2].length, 22 * 1024);
+
+  // Verify full data integrity on reassembly
+  const reassembled = Buffer.concat(largeChunks);
+  assert.deepEqual(reassembled, largeBuf);
+
+  // Case 4: Empty buffer
+  const emptyChunks = splitIntoChunks(Buffer.alloc(0), 1024);
+  assert.equal(emptyChunks.length, 0);
+});
+
 
 

@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -23,7 +24,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const ServerVersion = "1.2.1"
+const (
+	ServerVersion      = "1.2.1"
+	MaxRequestBodySize = 64 * 1024 * 1024 // 64 MB (AGENTS.md Rule 7.1)
+)
 
 //go:embed all:dist
 var embeddedUI embed.FS
@@ -127,6 +131,7 @@ func main() {
 			log.Printf("[WS] Upgrade error: %v", err)
 			return
 		}
+		conn.SetReadLimit(MaxRequestBodySize)
 
 		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 		session := NewWsTunnelSession(conn, subdomain, remoteIP)
@@ -509,6 +514,7 @@ func handleTunnelWebSocket(w http.ResponseWriter, r *http.Request, subdomain str
 		return
 	}
 	defer clientConn.Close()
+	clientConn.SetReadLimit(MaxRequestBodySize)
 
 	done := make(chan struct{})
 	var closeOnce sync.Once
@@ -602,9 +608,17 @@ func handleTunnelProxy(w http.ResponseWriter, r *http.Request, subdomain string,
 		return
 	}
 
-	// Read request body
+	// Limit request body to MaxRequestBodySize to prevent OOM/DoS (AGENTS.md Rule 7.1)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodySize)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			w.Write([]byte(`{"error":"errPayloadTooLarge","message":"Request body exceeds maximum allowed limit (64MB)"}`))
+			return
+		}
 		http.Error(w, "failed to read request body", http.StatusBadRequest)
 		return
 	}
