@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	ServerVersion      = "1.2.1"
+	ServerVersion      = "1.3.0"
 	MaxRequestBodySize = 64 * 1024 * 1024 // 64 MB (AGENTS.md Rule 7.1)
 )
 

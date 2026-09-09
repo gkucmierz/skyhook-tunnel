@@ -1,6 +1,6 @@
 {
   "name": "skyhook-tunnel",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "private": true,
   "description": "High-performance QUIC & WebSocket reverse-tunnel and proxy system",
   "type": "module",
@@ -18,7 +18,8 @@
     "build": "npm run build:ui && npm run build:server",
     "build:ui": "npm --prefix ui run build && mkdir -p server/dist && cp -r ui/dist/* server/dist/",
     "build:server": "cd server && go build -o bin/server .",
-    "test": "npm run test:cli && npm run test:server",
+    "test": "npm run test:versions && npm run test:cli && npm run test:server",
+    "test:versions": "node scripts/verify-versions.js",
     "test:cli": "node --test cli/test/*.test.js",
     "test:server": "cd server && go test -count=1 ./... && go build -o /dev/null .",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",

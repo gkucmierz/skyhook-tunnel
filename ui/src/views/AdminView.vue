@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from '../router.js';
 import { t } from '../locales.js';
+import pkg from '../../package.json';
 
 const router = useRouter();
 
@@ -21,7 +22,7 @@ const stats = ref({
   domain: 'skyhook.7u.pl',
   quic_port: 4443,
   status: 'online',
-  version: '1.2.1',
+  version: pkg.version,
 });
 const isLoadingTelemetry = ref(false);
 let pollTimer = null;
@@ -116,7 +117,7 @@ async function fetchTelemetry() {
       domain: data.domain || 'skyhook.7u.pl',
       quic_port: data.quic_port || 4443,
       status: data.status || 'online',
-      version: data.version || '1.2.1',
+      version: data.version || pkg.version,
     };
   } catch {
     // Graceful telemetry retry
