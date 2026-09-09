@@ -118,11 +118,13 @@ test('HTTP request propagates X-Forwarded headers and sets local Host', async (t
   let receivedHeaders = null;
   const localHttpServer = http.createServer((req, res) => {
     receivedHeaders = req.headers;
+    const body = JSON.stringify({ status: 'ok' });
     res.writeHead(200, {
       'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
       'Access-Control-Allow-Origin': 'http://127.0.0.1:3000',
     });
-    res.end(JSON.stringify({ status: 'ok' }));
+    res.end(body);
   });
 
   await new Promise((resolve) => localHttpServer.listen(0, '127.0.0.1', resolve));

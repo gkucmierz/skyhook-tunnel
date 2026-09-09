@@ -1,0 +1,28 @@
+#!/bin/sh
+set -e
+
+# Always execute from repository root
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$REPO_ROOT"
+
+echo "🚀 [Pre-Commit] Running Skyhook Tunnel pre-flight validation..."
+
+# 1. Check Node CLI syntax
+echo "📦 [1/4] Checking Node CLI syntax..."
+node -c cli/bin/skyhook.js
+node -c cli/src/client.js
+node -c cli/test/ws_tunnel.test.js
+
+# 2. Run Node CLI test suite
+echo "🧪 [2/4] Running Node CLI test suite..."
+node --test cli/test/*.test.js
+
+# 3. Run Go server test suite
+echo "🐹 [3/4] Running Go server tests..."
+(cd server && go test -count=1 ./...)
+
+# 4. Verify Go server compilation
+echo "🔨 [4/4] Verifying Go server compilation..."
+(cd server && go build -o /dev/null .)
+
+echo "✅ [Pre-Commit] All tests and build checks passed! Proceeding with commit."

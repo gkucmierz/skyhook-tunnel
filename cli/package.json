@@ -15,7 +15,7 @@
   "scripts": {
     "publish:npm": "npm publish --access public",
     "publish:gitea": "npm publish --registry https://gitea.7u.pl/api/packages/gkucmierz/npm/",
-    "test": "node bin/skyhook.js --help"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@gkucmierz/dport": "^1.4.3",

@@ -18,6 +18,10 @@
     "build": "npm run build:ui && npm run build:server",
     "build:ui": "npm --prefix ui run build && mkdir -p server/dist && cp -r ui/dist/* server/dist/",
     "build:server": "cd server && go build -o bin/server .",
+    "test": "npm run test:cli && npm run test:server",
+    "test:cli": "node --test cli/test/*.test.js",
+    "test:server": "cd server && go test -count=1 ./... && go build -o /dev/null .",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "publish:cli": "npm publish ./cli --access public",
     "publish:cli:gitea": "npm publish ./cli --registry https://gitea.7u.pl/api/packages/gkucmierz/npm/"
   },
