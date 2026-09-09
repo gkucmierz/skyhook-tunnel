@@ -223,6 +223,9 @@ export function startTunnel({
         const resHeaders = {};
         localRes.headers.forEach((val, key) => {
           if (!resHeaders[key]) resHeaders[key] = [];
+          if (key.toLowerCase() === 'location') {
+            val = rewriteLocation(val, localHost, port);
+          }
           resHeaders[key].push(val);
         });
 
@@ -370,3 +373,20 @@ function isBinaryContent(contentType) {
     ct.includes('wasm')
   );
 }
+
+export function rewriteLocation(locationHeader, localHost, port) {
+  if (!locationHeader) return locationHeader;
+  const escapedHost = localHost ? localHost.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+  const hostPattern = escapedHost
+    ? `${escapedHost}|localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]`
+    : 'localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]';
+  const regex = new RegExp(`^https?:\\/\\/(?:${hostPattern})(?::(?:${port}|\\d+))?(.*)$`, 'i');
+  const match = locationHeader.match(regex);
+  if (match) {
+    let path = match[1] || '/';
+    if (!path.startsWith('/')) path = '/' + path;
+    return path;
+  }
+  return locationHeader;
+}
+

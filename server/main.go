@@ -655,7 +655,7 @@ func isBinaryContent(contentType string) bool {
 		strings.Contains(ct, "wasm")
 }
 
-var localRedirectRegex = regexp.MustCompile(`^https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::\d+)?(/.*)?$`)
+var localRedirectRegex = regexp.MustCompile(`^https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(.*)$`)
 
 func rewriteLocationHeader(rawLocation, publicHost, scheme string) string {
 	if rawLocation == "" {
@@ -665,6 +665,8 @@ func rewriteLocationHeader(rawLocation, publicHost, scheme string) string {
 		path := matches[1]
 		if path == "" {
 			path = "/"
+		} else if !strings.HasPrefix(path, "/") {
+			path = "/" + path
 		}
 		return fmt.Sprintf("%s://%s%s", scheme, publicHost, path)
 	}

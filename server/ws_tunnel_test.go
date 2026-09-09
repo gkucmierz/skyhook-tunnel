@@ -273,6 +273,24 @@ func TestRewriteLocationHeader(t *testing.T) {
 			scheme:   "http",
 			expected: "/login", // relative unchanged
 		},
+		{
+			input:    "http://[::1]:3000/dashboard",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356/dashboard",
+		},
+		{
+			input:    "http://localhost:3000?search=test",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356/?search=test",
+		},
+		{
+			input:    "http://localhost:3000",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356/",
+		},
 	}
 
 	for _, tc := range tests {
@@ -307,6 +325,12 @@ func TestRewriteCorsOrigin(t *testing.T) {
 			host:     "my-app.localhost:17356",
 			scheme:   "http",
 			expected: "http://my-app.localhost:17356",
+		},
+		{
+			input:    "http://[::1]:3000",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://rapid-island.localhost:17356",
 		},
 		{
 			input:    "*",

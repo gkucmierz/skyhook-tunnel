@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { startTunnel } from '../src/client.js';
+import { startTunnel, rewriteLocation } from '../src/client.js';
 
 test('WebSocket tunneling forwards messages and closes cleanly', async (t) => {
   // 1. Setup local target server with WebSocket support
@@ -198,4 +198,23 @@ test('HTTP request propagates X-Forwarded headers and sets local Host', async (t
   await new Promise((resolve) => localHttpServer.close(resolve));
   await new Promise((resolve) => gatewayHttpServer.close(resolve));
 });
+
+test('rewriteLocation converts local redirects to relative paths', () => {
+  const cases = [
+    { input: 'http://127.0.0.1:3000/dashboard', host: '127.0.0.1', port: 3000, expected: '/dashboard' },
+    { input: 'http://localhost:3000/auth/callback?code=xyz', host: '127.0.0.1', port: 3000, expected: '/auth/callback?code=xyz' },
+    { input: 'http://[::1]:3000/settings', host: '127.0.0.1', port: 3000, expected: '/settings' },
+    { input: 'http://localhost:3000?search=1', host: '127.0.0.1', port: 3000, expected: '/?search=1' },
+    { input: 'http://localhost:3000', host: '127.0.0.1', port: 3000, expected: '/' },
+    { input: 'http://192.168.1.55:8080/api', host: '192.168.1.55', port: 8080, expected: '/api' },
+    { input: 'https://accounts.google.com/oauth', host: '127.0.0.1', port: 3000, expected: 'https://accounts.google.com/oauth' },
+    { input: '/login', host: '127.0.0.1', port: 3000, expected: '/login' },
+  ];
+
+  for (const tc of cases) {
+    const actual = rewriteLocation(tc.input, tc.host, tc.port);
+    assert.equal(actual, tc.expected, `rewriteLocation("${tc.input}")`);
+  }
+});
+
 
