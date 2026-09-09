@@ -209,6 +209,12 @@ test('rewriteLocation converts local redirects to relative paths', () => {
     { input: 'http://192.168.1.55:8080/api', host: '192.168.1.55', port: 8080, expected: '/api' },
     { input: 'https://accounts.google.com/oauth', host: '127.0.0.1', port: 3000, expected: 'https://accounts.google.com/oauth' },
     { input: '/login', host: '127.0.0.1', port: 3000, expected: '/login' },
+    // Security & Port Isolation: NEVER rewrite redirects to a different local port
+    { input: 'http://localhost:8080/secret', host: '127.0.0.1', port: 3000, expected: 'http://localhost:8080/secret' },
+    { input: 'http://127.0.0.1:6379/keys', host: '127.0.0.1', port: 3000, expected: 'http://127.0.0.1:6379/keys' },
+    // Security: NEVER match attacker domains masquerading as localhost
+    { input: 'http://localhost.attacker.com/steal', host: '127.0.0.1', port: 3000, expected: 'http://localhost.attacker.com/steal' },
+    { input: 'http://localhost@attacker.com/steal', host: '127.0.0.1', port: 3000, expected: 'http://localhost@attacker.com/steal' },
   ];
 
   for (const tc of cases) {

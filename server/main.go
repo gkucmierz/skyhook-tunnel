@@ -11,9 +11,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -655,29 +655,52 @@ func isBinaryContent(contentType string) bool {
 		strings.Contains(ct, "wasm")
 }
 
-var localRedirectRegex = regexp.MustCompile(`^https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?(.*)$`)
+func isLocalHost(host string) bool {
+	h := strings.ToLower(host)
+	if colon := strings.LastIndex(h, ":"); colon != -1 {
+		if !strings.HasSuffix(h, "]") || strings.LastIndex(h, "]") < colon {
+			h = h[:colon]
+		}
+	}
+	h = strings.TrimPrefix(strings.TrimSuffix(h, "]"), "[")
+	return h == "localhost" || h == "127.0.0.1" || h == "0.0.0.0" || h == "::1"
+}
 
 func rewriteLocationHeader(rawLocation, publicHost, scheme string) string {
 	if rawLocation == "" {
 		return rawLocation
 	}
-	if matches := localRedirectRegex.FindStringSubmatch(rawLocation); len(matches) > 0 {
-		path := matches[1]
-		if path == "" {
-			path = "/"
-		} else if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-		return fmt.Sprintf("%s://%s%s", scheme, publicHost, path)
+	u, err := url.Parse(rawLocation)
+	if err != nil || !u.IsAbs() {
+		return rawLocation
 	}
-	return rawLocation
+	if !isLocalHost(u.Host) {
+		return rawLocation
+	}
+
+	path := u.Path
+	if path == "" {
+		path = "/"
+	}
+	if u.RawQuery != "" {
+		path += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		path += "#" + u.Fragment
+	}
+
+	return fmt.Sprintf("%s://%s%s", scheme, publicHost, path)
 }
 
 func rewriteCorsOrigin(originHeader, publicHost, scheme string) string {
 	if originHeader == "" || originHeader == "*" {
 		return originHeader
 	}
-	if localRedirectRegex.MatchString(originHeader) {
+	u, err := url.Parse(originHeader)
+	if err != nil || !u.IsAbs() {
+		return originHeader
+	}
+	if isLocalHost(u.Host) {
 		return fmt.Sprintf("%s://%s", scheme, publicHost)
 	}
 	return originHeader

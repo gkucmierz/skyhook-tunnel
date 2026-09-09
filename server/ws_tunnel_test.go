@@ -291,6 +291,18 @@ func TestRewriteLocationHeader(t *testing.T) {
 			scheme:   "http",
 			expected: "http://rapid-island.localhost:17356/",
 		},
+		{
+			input:    "http://localhost.attacker.com/steal",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://localhost.attacker.com/steal",
+		},
+		{
+			input:    "http://127.0.0.1.attacker.com/steal",
+			host:     "rapid-island.localhost:17356",
+			scheme:   "http",
+			expected: "http://127.0.0.1.attacker.com/steal",
+		},
 	}
 
 	for _, tc := range tests {

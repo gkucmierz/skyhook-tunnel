@@ -376,17 +376,35 @@ function isBinaryContent(contentType) {
 
 export function rewriteLocation(locationHeader, localHost, port) {
   if (!locationHeader) return locationHeader;
-  const escapedHost = localHost ? localHost.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
-  const hostPattern = escapedHost
-    ? `${escapedHost}|localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]`
-    : 'localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]';
-  const regex = new RegExp(`^https?:\\/\\/(?:${hostPattern})(?::(?:${port}|\\d+))?(.*)$`, 'i');
-  const match = locationHeader.match(regex);
-  if (match) {
-    let path = match[1] || '/';
-    if (!path.startsWith('/')) path = '/' + path;
-    return path;
+  try {
+    const parsed = new URL(locationHeader);
+    const localHosts = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
+    if (localHost) {
+      localHosts.add(localHost.toLowerCase());
+      if (localHost.startsWith('[') && localHost.endsWith(']')) {
+        localHosts.add(localHost.slice(1, -1).toLowerCase());
+      }
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    const isLocalHost = localHosts.has(host) || localHosts.has(`[${host}]`);
+    if (!isLocalHost) {
+      return locationHeader;
+    }
+
+    // Strict port isolation:
+    // Only rewrite if the port is omitted (default) or matches the tunneled target port.
+    // If an application redirects to a different local port (e.g. 8080, 6379),
+    // NEVER rewrite it into a relative tunnel path!
+    if (parsed.port && port && parsed.port !== String(port)) {
+      return locationHeader;
+    }
+
+    const path = parsed.pathname || '/';
+    return path + parsed.search + parsed.hash;
+  } catch {
+    // Relative URL (e.g. '/login') or non-standard -> keep unchanged
+    return locationHeader;
   }
-  return locationHeader;
 }
 
