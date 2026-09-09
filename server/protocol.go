@@ -20,6 +20,7 @@ const (
 	MsgStreamStart MessageType = "STREAM_START"
 	MsgStreamChunk MessageType = "STREAM_CHUNK"
 	MsgStreamEnd   MessageType = "STREAM_END"
+	MsgStreamAbort MessageType = "STREAM_ABORT"
 )
 
 // TunnelPacket wraps all payload communications
@@ -35,6 +36,7 @@ type TunnelPacket struct {
 	StreamStart *StreamStartPayload `json:"stream_start,omitempty"`
 	StreamChunk *StreamChunkPayload `json:"stream_chunk,omitempty"`
 	StreamEnd   *StreamEndPayload   `json:"stream_end,omitempty"`
+	StreamAbort *StreamAbortPayload `json:"stream_abort,omitempty"`
 }
 
 type RegisterPayload struct {
@@ -102,6 +104,11 @@ type StreamEndPayload struct {
 	StreamID string `json:"stream_id"`
 	Error    string `json:"error,omitempty"`
 }
+
+type StreamAbortPayload struct {
+	StreamID string `json:"stream_id"`
+}
+
 
 func EncodePacket(p *TunnelPacket) ([]byte, error) {
 	return json.Marshal(p)

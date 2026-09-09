@@ -58,7 +58,9 @@ func (s *WsTunnelSession) Close() error {
 	s.closeOnce.Do(func() {
 		close(s.closed)
 		s.writeLock.Lock()
-		err = s.conn.Close()
+		if s.conn != nil {
+			err = s.conn.Close()
+		}
 		s.writeLock.Unlock()
 
 		s.pendingLock.Lock()
@@ -196,6 +198,10 @@ func (s *WsTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, re
 					w.Header().Add(k, v)
 				}
 			}
+			ct := strings.ToLower(strings.Join(start.Headers["Content-Type"], ""))
+			if strings.Contains(ct, "text/event-stream") && w.Header().Get("X-Accel-Buffering") == "" {
+				w.Header().Set("X-Accel-Buffering", "no")
+			}
 			w.WriteHeader(start.StatusCode)
 			if flusher != nil {
 				flusher.Flush()
@@ -205,6 +211,12 @@ func (s *WsTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, re
 			for {
 				select {
 				case <-r.Context().Done():
+					s.SendPacket(&TunnelPacket{
+						Type: MsgStreamAbort,
+						StreamAbort: &StreamAbortPayload{
+							StreamID: req.StreamID,
+						},
+					})
 					return nil
 				case <-s.closed:
 					return errors.New("tunnel disconnected during stream")
@@ -237,6 +249,12 @@ func (s *WsTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, re
 	case <-s.closed:
 		return errors.New("tunnel disconnected during request")
 	case <-r.Context().Done():
+		s.SendPacket(&TunnelPacket{
+			Type: MsgStreamAbort,
+			StreamAbort: &StreamAbortPayload{
+				StreamID: req.StreamID,
+			},
+		})
 		return r.Context().Err()
 	}
 }
@@ -255,6 +273,9 @@ func (s *WsTunnelSession) SendPacket(packet *TunnelPacket) error {
 
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
+	if s.conn == nil {
+		return nil
+	}
 	return s.conn.WriteMessage(websocket.TextMessage, data)
 }
 

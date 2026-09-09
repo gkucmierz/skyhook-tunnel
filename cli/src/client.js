@@ -16,14 +16,21 @@ export function startTunnel({
 
   const ws = new WebSocket(wsUrl);
   const activeWsStreams = new Map();
+  const activeHttpStreams = new Map();
 
-  const cleanupWsStreams = () => {
+  const cleanupStreams = () => {
     for (const [id, s] of activeWsStreams.entries()) {
       try {
         s.close(1000, 'tunnel closed');
       } catch {}
     }
     activeWsStreams.clear();
+    for (const [id, controller] of activeHttpStreams.entries()) {
+      try {
+        controller.abort();
+      } catch {}
+    }
+    activeHttpStreams.clear();
   };
 
   ws.on('open', () => {
@@ -191,9 +198,24 @@ export function startTunnel({
       return;
     }
 
+    if (packet.type === 'STREAM_ABORT' && packet.stream_abort) {
+      const { stream_id } = packet.stream_abort;
+      const controller = activeHttpStreams.get(stream_id);
+      if (controller) {
+        activeHttpStreams.delete(stream_id);
+        try {
+          controller.abort();
+        } catch {}
+      }
+      return;
+    }
+
     if (packet.type === 'REQUEST' && packet.request) {
       const startTime = performance.now();
       const req = packet.request;
+
+      const abortController = new AbortController();
+      activeHttpStreams.set(req.stream_id, abortController);
 
       try {
         const localUrl = `http://${localHost}:${port}${req.url}`;
@@ -201,6 +223,7 @@ export function startTunnel({
           method: req.method,
           headers: {},
           redirect: 'manual',
+          signal: abortController.signal,
         };
 
         // Forward headers (excluding host/connection)
@@ -328,6 +351,9 @@ export function startTunnel({
           `  ${statusColor}${localRes.status}\x1b[0m \x1b[1m${req.method}\x1b[0m ${req.url} \x1b[90m(${elapsed}ms)\x1b[0m`
         );
       } catch (err) {
+        if (err.name === 'AbortError') {
+          return;
+        }
         console.error(`  \x1b[31mERR\x1b[0m ${req.method} ${req.url}: ${err.message}`);
         const errorPacket = {
           type: 'RESPONSE',
@@ -342,6 +368,8 @@ export function startTunnel({
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify(errorPacket));
         }
+      } finally {
+        activeHttpStreams.delete(req.stream_id);
       }
     }
   });
@@ -351,13 +379,13 @@ export function startTunnel({
   });
 
   ws.on('close', () => {
-    cleanupWsStreams();
+    cleanupStreams();
     if (onClose) onClose();
   });
 
   return {
     close: () => {
-      cleanupWsStreams();
+      cleanupStreams();
       ws.close();
     },
   };

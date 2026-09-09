@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"testing"
+	"time"
 )
 
 func TestWsProtocolPackets(t *testing.T) {
@@ -149,6 +150,25 @@ func TestWsProtocolPackets(t *testing.T) {
 	decodedEnd, err := DecodePacket(endData)
 	if err != nil || decodedEnd.Type != MsgStreamEnd || decodedEnd.StreamEnd == nil {
 		t.Fatalf("failed to decode StreamEnd packet: %+v", decodedEnd)
+	}
+
+	// 5. Test StreamAbort packet
+	streamAbort := &TunnelPacket{
+		Type: MsgStreamAbort,
+		StreamAbort: &StreamAbortPayload{
+			StreamID: "stream-99",
+		},
+	}
+	abortData, err := EncodePacket(streamAbort)
+	if err != nil {
+		t.Fatalf("failed to encode StreamAbort packet: %v", err)
+	}
+	decodedAbort, err := DecodePacket(abortData)
+	if err != nil || decodedAbort.Type != MsgStreamAbort || decodedAbort.StreamAbort == nil {
+		t.Fatalf("failed to decode StreamAbort packet: %+v", decodedAbort)
+	}
+	if decodedAbort.StreamAbort.StreamID != "stream-99" {
+		t.Errorf("unexpected StreamAbort payload: %+v", decodedAbort.StreamAbort)
 	}
 }
 
@@ -461,4 +481,125 @@ func TestCopyAndInjectProxyHeaders(t *testing.T) {
 		t.Errorf("expected X-Forwarded-Port 443, got %v", h2["X-Forwarded-Port"])
 	}
 }
+
+type mockFlushingWriter struct {
+	header     http.Header
+	statusCode int
+	body       []byte
+	flushCount int
+}
+
+func newMockFlushingWriter() *mockFlushingWriter {
+	return &mockFlushingWriter{header: make(http.Header)}
+}
+
+func (m *mockFlushingWriter) Header() http.Header {
+	return m.header
+}
+
+func (m *mockFlushingWriter) Write(b []byte) (int, error) {
+	m.body = append(m.body, b...)
+	return len(b), nil
+}
+
+func (m *mockFlushingWriter) WriteHeader(statusCode int) {
+	m.statusCode = statusCode
+}
+
+func (m *mockFlushingWriter) Flush() {
+	m.flushCount++
+}
+
+func TestWsTunnelSession_Streaming(t *testing.T) {
+	sess := NewWsTunnelSession(nil, "rapid-island", "127.0.0.1")
+	defer sess.Close()
+
+	streamID := "stream-test-42"
+	req := &RequestPayload{
+		StreamID: streamID,
+		Method:   "GET",
+		URL:      "/events",
+	}
+
+	r, _ := http.NewRequest("GET", "http://rapid-island.localhost:17356/events", nil)
+	w := newMockFlushingWriter()
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- sess.ForwardHttp(w, r, req)
+	}()
+
+	// Wait briefly for ForwardHttp to register pendingReqs
+	time.Sleep(20 * time.Millisecond)
+
+	sess.pendingLock.Lock()
+	ch := sess.pendingReqs[streamID]
+	sess.pendingLock.Unlock()
+
+	if ch == nil {
+		t.Fatalf("expected pending channel for %s", streamID)
+	}
+
+	// Send STREAM_START
+	ch <- &TunnelPacket{
+		Type: MsgStreamStart,
+		StreamStart: &StreamStartPayload{
+			StreamID:   streamID,
+			StatusCode: 200,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
+			},
+		},
+	}
+
+	// Send 2 chunks
+	ch <- &TunnelPacket{
+		Type: MsgStreamChunk,
+		StreamChunk: &StreamChunkPayload{
+			StreamID: streamID,
+			Data:     "data: chunk-1\n\n",
+			IsBinary: false,
+		},
+	}
+
+	ch <- &TunnelPacket{
+		Type: MsgStreamChunk,
+		StreamChunk: &StreamChunkPayload{
+			StreamID: streamID,
+			Data:     "data: chunk-2\n\n",
+			IsBinary: false,
+		},
+	}
+
+	// Send STREAM_END
+	ch <- &TunnelPacket{
+		Type: MsgStreamEnd,
+		StreamEnd: &StreamEndPayload{
+			StreamID: streamID,
+		},
+	}
+
+	select {
+	case err := <-errChan:
+		if err != nil {
+			t.Fatalf("ForwardHttp returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for ForwardHttp to complete")
+	}
+
+	if w.statusCode != 200 {
+		t.Errorf("expected status code 200, got %d", w.statusCode)
+	}
+	if string(w.body) != "data: chunk-1\n\ndata: chunk-2\n\n" {
+		t.Errorf("unexpected body: %q", string(w.body))
+	}
+	if w.flushCount < 3 {
+		t.Errorf("expected at least 3 flushes (start + 2 chunks), got %d", w.flushCount)
+	}
+	if w.Header().Get("X-Accel-Buffering") != "no" {
+		t.Errorf("expected X-Accel-Buffering: no for SSE, got %q", w.Header().Get("X-Accel-Buffering"))
+	}
+}
+
 
