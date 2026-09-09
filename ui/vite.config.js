@@ -8,15 +8,15 @@ export default defineConfig({
     port: 34430,
     proxy: {
       '/api': {
-        target: 'http://localhost:17356',
+        target: 'http://127.0.0.1:17356',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:17356',
+        target: 'ws://127.0.0.1:17356',
         ws: true,
       },
       '/tunnel_ws': {
-        target: 'ws://localhost:17356',
+        target: 'ws://127.0.0.1:17356',
         ws: true,
       },
     },

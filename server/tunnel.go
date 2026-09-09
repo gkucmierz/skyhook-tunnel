@@ -3,12 +3,18 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 )
 
 type TunnelSession interface {
 	SendRequest(req *RequestPayload) (*ResponsePayload, error)
+	ForwardHttp(w http.ResponseWriter, r *http.Request, req *RequestPayload) error
+	SendPacket(packet *TunnelPacket) error
+	RegisterWsStream(streamID string) (chan *WsMessagePayload, chan struct{}, func())
+	DispatchWsMessage(msg *WsMessagePayload)
+	DispatchWsClose(closePayload *WsClosePayload)
 	Close() error
 	TransportType() string
 	ClientIP() string
@@ -27,15 +33,17 @@ type TunnelInfo struct {
 }
 
 type TunnelRegistry struct {
-	mu      sync.RWMutex
-	tunnels map[string]*TunnelInfo
-	domain  string
+	mu        sync.RWMutex
+	tunnels   map[string]*TunnelInfo
+	domain    string
+	telemetry *TelemetryStore
 }
 
-func NewTunnelRegistry(domain string) *TunnelRegistry {
+func NewTunnelRegistry(domain string, telemetry *TelemetryStore) *TunnelRegistry {
 	return &TunnelRegistry{
-		tunnels: make(map[string]*TunnelInfo),
-		domain:  domain,
+		tunnels:   make(map[string]*TunnelInfo),
+		domain:    domain,
+		telemetry: telemetry,
 	}
 }
 
@@ -58,6 +66,9 @@ func (r *TunnelRegistry) Register(subdomain string, session TunnelSession) (*Tun
 	}
 
 	r.tunnels[subdomain] = info
+	if r.telemetry != nil {
+		r.telemetry.RecordTunnel(session.TransportType())
+	}
 	return info, nil
 }
 
@@ -103,11 +114,74 @@ func (r *TunnelRegistry) Forward(subdomain string, req *RequestPayload) (*Respon
 
 	r.mu.Lock()
 	info.TotalRequests++
-	info.TotalBytes += int64(len(req.Body) + len(res.Body))
+	bytes := int64(len(req.Body) + len(res.Body))
+	info.TotalBytes += bytes
 	info.LastActivityAt = time.Now()
 	r.mu.Unlock()
 
+	if r.telemetry != nil {
+		r.telemetry.RecordTraffic(1, bytes)
+	}
+
 	return res, nil
+}
+
+func (r *TunnelRegistry) ForwardHttp(w http.ResponseWriter, req *http.Request, reqPayload *RequestPayload, subdomain string) error {
+	r.mu.RLock()
+	info, exists := r.tunnels[subdomain]
+	r.mu.RUnlock()
+
+	if !exists {
+		return errors.New("tunnel not found or disconnected")
+	}
+
+	err := info.Session.ForwardHttp(w, req, reqPayload)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	info.TotalRequests++
+	info.LastActivityAt = time.Now()
+	r.mu.Unlock()
+
+	if r.telemetry != nil {
+		r.telemetry.RecordTraffic(1, 0)
+	}
+
+	return nil
+}
+
+func (r *TunnelRegistry) ForwardWsOpen(subdomain string, openPayload *WsOpenPayload) (TunnelSession, chan *WsMessagePayload, chan struct{}, func(), error) {
+	r.mu.RLock()
+	info, exists := r.tunnels[subdomain]
+	r.mu.RUnlock()
+
+	if !exists {
+		return nil, nil, nil, nil, errors.New("tunnel not found or disconnected")
+	}
+
+	msgChan, closeChan, cleanup := info.Session.RegisterWsStream(openPayload.StreamID)
+
+	packet := &TunnelPacket{
+		Type:   MsgWsOpen,
+		WsOpen: openPayload,
+	}
+	if err := info.Session.SendPacket(packet); err != nil {
+		cleanup()
+		return nil, nil, nil, nil, err
+	}
+
+	r.mu.Lock()
+	info.TotalRequests++
+	info.LastActivityAt = time.Now()
+	r.mu.Unlock()
+
+	if r.telemetry != nil {
+		r.telemetry.RecordTraffic(1, 0)
+	}
+
+	return info.Session, msgChan, closeChan, cleanup, nil
 }
 
 func (r *TunnelRegistry) List() []*TunnelInfo {

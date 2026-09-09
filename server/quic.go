@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +52,45 @@ func (s *QuicTunnelSession) Close() error {
 		err = s.conn.CloseWithError(0, "tunnel closed")
 	})
 	return err
+}
+
+func (s *QuicTunnelSession) SendPacket(packet *TunnelPacket) error {
+	return errors.New("SendPacket not supported on standalone QUIC session")
+}
+
+func (s *QuicTunnelSession) RegisterWsStream(streamID string) (chan *WsMessagePayload, chan struct{}, func()) {
+	return nil, nil, func() {}
+}
+
+func (s *QuicTunnelSession) DispatchWsMessage(msg *WsMessagePayload) {}
+
+func (s *QuicTunnelSession) DispatchWsClose(closePayload *WsClosePayload) {}
+
+func (s *QuicTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, req *RequestPayload) error {
+	res, err := s.SendRequest(req)
+	if err != nil {
+		return err
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	for k, vv := range res.Headers {
+		for _, v := range vv {
+			if strings.EqualFold(k, "Location") {
+				v = rewriteLocationHeader(v, r.Host, scheme)
+			}
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(res.StatusCode)
+	if res.IsBase64 {
+		decoded, _ := base64.StdEncoding.DecodeString(res.Body)
+		w.Write(decoded)
+	} else {
+		w.Write([]byte(res.Body))
+	}
+	return nil
 }
 
 func (s *QuicTunnelSession) SendRequest(req *RequestPayload) (*ResponsePayload, error) {

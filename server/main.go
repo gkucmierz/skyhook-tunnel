@@ -13,10 +13,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const ServerVersion = "1.2.1"
@@ -84,8 +88,25 @@ func main() {
 		log.Printf("⚠️  ADMIN_PASSWORD not set in environment, defaulting to 'skyhook' for local development")
 	}
 
+	dataPath := os.Getenv("DATA_PATH")
+	if dataPath == "" {
+		dataPath = "./data/telemetry.json"
+	}
+	telemetryStore := NewTelemetryStore(dataPath)
+	telemetryStore.StartFlusher(1 * time.Minute)
+
+	// Graceful shutdown to flush telemetry to disk when container restarts (e.g. CI/CD rebuild)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigChan
+		log.Printf("🛑 Received signal %v, flushing telemetry to disk before exit...", sig)
+		_ = telemetryStore.Save()
+		os.Exit(0)
+	}()
+
 	quicPort, _ := strconv.Atoi(quicPortStr)
-	registry := NewTunnelRegistry(baseDomain)
+	registry := NewTunnelRegistry(baseDomain, telemetryStore)
 
 	// 1. Start QUIC Listener in background
 	go StartQuicListener(quicPort, registry)
@@ -148,6 +169,7 @@ func main() {
 			"domain":       baseDomain,
 			"quic_port":    quicPort,
 			"active_count": registry.Count(),
+			"telemetry":    telemetryStore.GetSummary(),
 			"timestamp":    time.Now().Unix(),
 		})
 	})
@@ -236,6 +258,7 @@ func main() {
 			"quic_port":    quicPort,
 			"active_count": len(tunnels),
 			"tunnels":      tunnels,
+			"telemetry":    telemetryStore.GetSummary(),
 			"timestamp":    time.Now().Unix(),
 		})
 	})
@@ -403,6 +426,156 @@ func main() {
 	server.Close()
 }
 
+func copyAndInjectProxyHeaders(r *http.Request) map[string][]string {
+	headers := make(map[string][]string, len(r.Header)+4)
+	for k, vv := range r.Header {
+		copied := make([]string, len(vv))
+		copy(copied, vv)
+		headers[k] = copied
+	}
+
+	remoteIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remoteIP); err == nil {
+		remoteIP = host
+	}
+
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+
+	if prior := headers["X-Forwarded-For"]; len(prior) > 0 {
+		headers["X-Forwarded-For"] = []string{strings.Join(prior, ", ") + ", " + remoteIP}
+	} else {
+		headers["X-Forwarded-For"] = []string{remoteIP}
+	}
+
+	headers["X-Forwarded-Host"] = []string{r.Host}
+	headers["X-Forwarded-Proto"] = []string{scheme}
+	headers["X-Real-Ip"] = []string{remoteIP}
+
+	return headers
+}
+
+func handleTunnelWebSocket(w http.ResponseWriter, r *http.Request, subdomain string, registry *TunnelRegistry) {
+	streamID := fmt.Sprintf("ws-%d-%d", time.Now().UnixNano(), time.Now().Unix())
+
+	openPayload := &WsOpenPayload{
+		StreamID: streamID,
+		URL:      r.URL.RequestURI(),
+		Headers:  copyAndInjectProxyHeaders(r),
+		Protocol: r.Header.Get("Sec-WebSocket-Protocol"),
+	}
+
+	session, msgChan, closeChan, cleanup, err := registry.ForwardWsOpen(subdomain, openPayload)
+	if err != nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, "Skyhook 502: Tunnel Offline for subdomain %s (%v)\n", subdomain, err)
+		return
+	}
+	defer cleanup()
+
+	var responseHeader http.Header
+	if subproto := r.Header.Get("Sec-WebSocket-Protocol"); subproto != "" {
+		protos := strings.Split(subproto, ",")
+		if len(protos) > 0 {
+			responseHeader = http.Header{
+				"Sec-WebSocket-Protocol": []string{strings.TrimSpace(protos[0])},
+			}
+		}
+	}
+
+	clientConn, err := upgrader.Upgrade(w, r, responseHeader)
+	if err != nil {
+		log.Printf("[WS-PROXY] ⚠️ Upgrade error for %s (%s): %v", subdomain, streamID, err)
+		_ = session.SendPacket(&TunnelPacket{
+			Type: MsgWsClose,
+			WsClose: &WsClosePayload{
+				StreamID: streamID,
+				Code:     1006,
+				Reason:   err.Error(),
+			},
+		})
+		return
+	}
+	defer clientConn.Close()
+
+	done := make(chan struct{})
+	var closeOnce sync.Once
+	safeClose := func(code int, reason string) {
+		closeOnce.Do(func() {
+			close(done)
+			_ = session.SendPacket(&TunnelPacket{
+				Type: MsgWsClose,
+				WsClose: &WsClosePayload{
+					StreamID: streamID,
+					Code:     code,
+					Reason:   reason,
+				},
+			})
+		})
+	}
+
+	// 1. Browser Client -> Local Tunnel CLI
+	go func() {
+		defer safeClose(1000, "client disconnected")
+		for {
+			msgType, data, err := clientConn.ReadMessage()
+			if err != nil {
+				return
+			}
+
+			isBinary := (msgType == websocket.BinaryMessage)
+			var dataStr string
+			if isBinary {
+				dataStr = base64.StdEncoding.EncodeToString(data)
+			} else {
+				dataStr = string(data)
+			}
+
+			packet := &TunnelPacket{
+				Type: MsgWsMessage,
+				WsMessage: &WsMessagePayload{
+					StreamID: streamID,
+					Data:     dataStr,
+					IsBinary: isBinary,
+				},
+			}
+			if err := session.SendPacket(packet); err != nil {
+				return
+			}
+		}
+	}()
+
+	// 2. Local Tunnel CLI -> Browser Client
+	for {
+		select {
+		case <-done:
+			return
+		case <-closeChan:
+			clientConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(1000, "tunnel closed"))
+			return
+		case msg, ok := <-msgChan:
+			if !ok || msg == nil {
+				return
+			}
+			if msg.IsBinary {
+				data, _ := base64.StdEncoding.DecodeString(msg.Data)
+				if err := clientConn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+					safeClose(1006, "write error")
+					return
+				}
+			} else {
+				if err := clientConn.WriteMessage(websocket.TextMessage, []byte(msg.Data)); err != nil {
+					safeClose(1006, "write error")
+					return
+				}
+			}
+		}
+	}
+}
+
 func handleTunnelProxy(w http.ResponseWriter, r *http.Request, subdomain string, registry *TunnelRegistry) {
 	// Intercept robots.txt to prevent search engine indexing of tunnel endpoints
 	if r.URL.Path == "/robots.txt" {
@@ -410,6 +583,13 @@ func handleTunnelProxy(w http.ResponseWriter, r *http.Request, subdomain string,
 		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("User-agent: *\nDisallow: /\n"))
+		return
+	}
+
+	// Intercept WebSocket upgrade requests and proxy full-duplex frames
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") ||
+		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") {
+		handleTunnelWebSocket(w, r, subdomain, registry)
 		return
 	}
 
@@ -435,12 +615,12 @@ func handleTunnelProxy(w http.ResponseWriter, r *http.Request, subdomain string,
 		StreamID: streamID,
 		Method:   r.Method,
 		URL:      r.URL.RequestURI(),
-		Headers:  r.Header,
+		Headers:  copyAndInjectProxyHeaders(r),
 		Body:     bodyStr,
 		IsBase64: isBinary,
 	}
 
-	resPayload, err := registry.Forward(subdomain, reqPayload)
+	err = registry.ForwardHttp(w, r, reqPayload, subdomain)
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
@@ -455,21 +635,6 @@ func handleTunnelProxy(w http.ResponseWriter, r *http.Request, subdomain string,
 		`, subdomain, err)
 		return
 	}
-
-	// Copy response headers
-	for k, vv := range resPayload.Headers {
-		for _, v := range vv {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resPayload.StatusCode)
-
-	if resPayload.IsBase64 {
-		decoded, _ := base64.StdEncoding.DecodeString(resPayload.Body)
-		w.Write(decoded)
-	} else {
-		w.Write([]byte(resPayload.Body))
-	}
 }
 
 func isBinaryContent(contentType string) bool {
@@ -479,4 +644,20 @@ func isBinaryContent(contentType string) bool {
 		strings.Contains(ct, "video/") ||
 		strings.Contains(ct, "octet-stream") ||
 		strings.Contains(ct, "wasm")
+}
+
+var localRedirectRegex = regexp.MustCompile(`^https?://(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::\d+)?(/.*)?$`)
+
+func rewriteLocationHeader(rawLocation, publicHost, scheme string) string {
+	if rawLocation == "" {
+		return rawLocation
+	}
+	if matches := localRedirectRegex.FindStringSubmatch(rawLocation); len(matches) > 0 {
+		path := matches[1]
+		if path == "" {
+			path = "/"
+		}
+		return fmt.Sprintf("%s://%s%s", scheme, publicHost, path)
+	}
+	return rawLocation
 }

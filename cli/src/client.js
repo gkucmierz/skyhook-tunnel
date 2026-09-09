@@ -15,6 +15,16 @@ export function startTunnel({
   const wsUrl = `${protocol}://${cleanServer}/tunnel_ws?subdomain=${encodeURIComponent(subdomain)}`;
 
   const ws = new WebSocket(wsUrl);
+  const activeWsStreams = new Map();
+
+  const cleanupWsStreams = () => {
+    for (const [id, s] of activeWsStreams.entries()) {
+      try {
+        s.close(1000, 'tunnel closed');
+      } catch {}
+    }
+    activeWsStreams.clear();
+  };
 
   ws.on('open', () => {
     // Connected to gateway, waiting for REGISTER_ACK
@@ -39,6 +49,148 @@ export function startTunnel({
       return;
     }
 
+    if (packet.type === 'WS_OPEN' && packet.ws_open) {
+      const { stream_id, url, headers = {}, protocol: subprotocol } = packet.ws_open;
+      const localWsUrl = `ws://${localHost}:${port}${url}`;
+
+      const wsOptions = {
+        headers: {},
+      };
+      for (const [key, val] of Object.entries(headers)) {
+        const lKey = key.toLowerCase();
+        if (
+          lKey !== 'host' &&
+          lKey !== 'upgrade' &&
+          lKey !== 'connection' &&
+          lKey !== 'sec-websocket-key' &&
+          lKey !== 'sec-websocket-version' &&
+          lKey !== 'sec-websocket-extensions'
+        ) {
+          wsOptions.headers[key] = Array.isArray(val) ? val.join(', ') : val;
+        }
+      }
+
+      // Preserve client origin in X-Forwarded-Origin and adapt Origin to local target
+      // to avoid 403 Forbidden / CORS rejection on local dev servers (e.g. Vite HMR)
+      const incomingOrigin = wsOptions.headers['origin'] || wsOptions.headers['Origin'];
+      if (incomingOrigin) {
+        wsOptions.headers['X-Forwarded-Origin'] = incomingOrigin;
+        delete wsOptions.headers['origin'];
+      }
+      wsOptions.headers['Origin'] = `http://${localHost}:${port}`;
+
+      const protocols = subprotocol
+        ? subprotocol.split(',').map((p) => p.trim()).filter(Boolean)
+        : undefined;
+
+      try {
+        const localWs = new WebSocket(localWsUrl, protocols, wsOptions);
+        activeWsStreams.set(stream_id, localWs);
+
+        console.log(`  \x1b[35m⚡ WS\x1b[0m CONNECT ${url} \x1b[90m(stream: ${stream_id})\x1b[0m`);
+
+        localWs.on('message', (data, isBinary) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            let dataStr;
+            if (isBinary) {
+              dataStr = Buffer.from(data).toString('base64');
+            } else {
+              dataStr = data.toString('utf8');
+            }
+
+            ws.send(
+              JSON.stringify({
+                type: 'WS_MESSAGE',
+                ws_message: {
+                  stream_id,
+                  data: dataStr,
+                  is_binary: !!isBinary,
+                },
+              })
+            );
+          }
+        });
+
+        localWs.on('close', (code, reason) => {
+          activeWsStreams.delete(stream_id);
+          console.log(`  \x1b[35m⚡ WS\x1b[0m CLOSE ${url} \x1b[90m(code: ${code})\x1b[0m`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'WS_CLOSE',
+                ws_close: {
+                  stream_id,
+                  code,
+                  reason: reason ? reason.toString() : '',
+                },
+              })
+            );
+          }
+        });
+
+        localWs.on('error', (err) => {
+          activeWsStreams.delete(stream_id);
+          console.error(`  \x1b[31m⚡ WS ERR\x1b[0m ${url}: ${err.message}`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'WS_CLOSE',
+                ws_close: {
+                  stream_id,
+                  code: 1006,
+                  reason: err.message,
+                },
+              })
+            );
+          }
+        });
+      } catch (err) {
+        console.error(`  \x1b[31m⚡ WS SETUP ERR\x1b[0m ${url}: ${err.message}`);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: 'WS_CLOSE',
+              ws_close: {
+                stream_id,
+                code: 1006,
+                reason: err.message,
+              },
+            })
+          );
+        }
+      }
+      return;
+    }
+
+    if (packet.type === 'WS_MESSAGE' && packet.ws_message) {
+      const { stream_id, data, is_binary } = packet.ws_message;
+      const localWs = activeWsStreams.get(stream_id);
+      if (localWs && localWs.readyState === WebSocket.OPEN) {
+        if (is_binary) {
+          localWs.send(Buffer.from(data, 'base64'));
+        } else {
+          localWs.send(data);
+        }
+      }
+      return;
+    }
+
+    if (packet.type === 'WS_CLOSE' && packet.ws_close) {
+      const { stream_id, code, reason } = packet.ws_close;
+      const localWs = activeWsStreams.get(stream_id);
+      if (localWs) {
+        activeWsStreams.delete(stream_id);
+        if (localWs.readyState === WebSocket.OPEN || localWs.readyState === WebSocket.CONNECTING) {
+          try {
+            localWs.close(code || 1000, reason ? reason.toString() : '');
+          } catch {
+            // ignore
+          }
+        }
+      }
+      return;
+    }
+
     if (packet.type === 'REQUEST' && packet.request) {
       const startTime = performance.now();
       const req = packet.request;
@@ -48,6 +200,7 @@ export function startTunnel({
         const fetchOptions = {
           method: req.method,
           headers: {},
+          redirect: 'manual',
         };
 
         // Forward headers (excluding host/connection)
@@ -74,6 +227,71 @@ export function startTunnel({
         });
 
         const contentType = localRes.headers.get('content-type') || '';
+        const isSse = contentType.toLowerCase().includes('text/event-stream');
+        const transferEncoding = (localRes.headers.get('transfer-encoding') || '').toLowerCase();
+        const isChunked = transferEncoding.includes('chunked');
+        const hasContentLength = localRes.headers.has('content-length');
+        const contentLength = parseInt(localRes.headers.get('content-length') || '0', 10);
+        const isLarge = contentLength > 128 * 1024;
+        const isStream = isSse || isChunked || isLarge || (!hasContentLength && localRes.status === 200 && req.method !== 'HEAD');
+
+        if (isStream && localRes.body) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'STREAM_START',
+                stream_start: {
+                  stream_id: req.stream_id,
+                  status_code: localRes.status,
+                  headers: resHeaders,
+                },
+              })
+            );
+          }
+
+          const reader = localRes.body.getReader();
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                  JSON.stringify({
+                    type: 'STREAM_CHUNK',
+                    stream_chunk: {
+                      stream_id: req.stream_id,
+                      data: Buffer.from(value).toString('base64'),
+                      is_binary: true,
+                    },
+                  })
+                );
+              } else {
+                break;
+              }
+            }
+          } finally {
+            reader.releaseLock();
+          }
+
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'STREAM_END',
+                stream_end: {
+                  stream_id: req.stream_id,
+                },
+              })
+            );
+          }
+
+          const elapsed = Math.round(performance.now() - startTime);
+          const statusColor = localRes.status >= 400 ? '\x1b[31m' : '\x1b[32m';
+          console.log(
+            `  ${statusColor}${localRes.status}\x1b[0m \x1b[1m${req.method}\x1b[0m ${req.url} \x1b[90m(stream, ${elapsed}ms)\x1b[0m`
+          );
+          return;
+        }
+
         const isBinary = isBinaryContent(contentType);
 
         let bodyStr = '';
@@ -130,11 +348,15 @@ export function startTunnel({
   });
 
   ws.on('close', () => {
+    cleanupWsStreams();
     if (onClose) onClose();
   });
 
   return {
-    close: () => ws.close(),
+    close: () => {
+      cleanupWsStreams();
+      ws.close();
+    },
   };
 }
 
