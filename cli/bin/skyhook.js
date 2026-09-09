@@ -3,6 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { exec } from 'child_process';
 import { startTunnel } from '../src/client.js';
 import { generateSubdomain } from '../src/names.js';
 import { getDeterministicPort, sanitizeSubdomain, readCurrentPackageName } from '../src/dport.js';
@@ -190,15 +191,26 @@ if (args.includes('--tls') || explicitProtocol === 'https:' || explicitProtocol 
   isSecure = false;
 }
 
+function openBrowser(url) {
+  const cmd = process.platform === 'darwin'
+    ? `open "${url}"`
+    : process.platform === 'win32'
+      ? `start "" "${url}"`
+      : `xdg-open "${url}"`;
+  exec(cmd, () => {});
+}
+
 const bannerText = `⚡ SKYHOOK TUNNEL v${version}`;
-const totalWidth = 62;
-const padTotal = Math.max(0, totalWidth - bannerText.length);
+const innerWidth = 64;
+// In terminal monospace fonts, '⚡' (U+26A1) occupies 2 visual cells, while bannerText.length counts it as 1.
+const bannerVisualWidth = bannerText.length + 1;
+const padTotal = Math.max(0, innerWidth - bannerVisualWidth);
 const padLeft = Math.floor(padTotal / 2);
 const padRight = padTotal - padLeft;
 
-console.log(`\n\x1b[36m\x1b[1m╔════════════════════════════════════════════════════════════════╗\x1b[0m`);
+console.log(`\n\x1b[36m\x1b[1m╔${'═'.repeat(innerWidth)}╗\x1b[0m`);
 console.log(`\x1b[36m\x1b[1m║${' '.repeat(padLeft)}${bannerText}${' '.repeat(padRight)}║\x1b[0m`);
-console.log(`\x1b[36m\x1b[1m╚════════════════════════════════════════════════════════════════╝\x1b[0m`);
+console.log(`\x1b[36m\x1b[1m╚${'═'.repeat(innerWidth)}╝\x1b[0m`);
 console.log(`  \x1b[90mConnecting to gateway:\x1b[0m ${serverHost} ...`);
 
 startTunnel({
@@ -218,7 +230,22 @@ startTunnel({
     console.log(`  \x1b[1mTunnel URL:\x1b[0m    \x1b[36m\x1b[4m${displayUrl}\x1b[0m`);
     console.log(`  \x1b[1mSubdomain:\x1b[0m     ${ack.subdomain}`);
     console.log(`\n  \x1b[90mForwarding incoming web requests to ${targetHost}:${targetPort}...\x1b[0m`);
-    console.log(`  \x1b[90mPress Ctrl+C to close tunnel\x1b[0m\n`);
+    console.log(`  \x1b[90mPress \x1b[1m'o'\x1b[0m\x1b[90m to open in browser, \x1b[1mCtrl+C\x1b[0m\x1b[90m to close tunnel\x1b[0m\n`);
+
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (key) => {
+        if (key === '\u0003' || key === '\u0004' || key === '\u001A') {
+          process.exit(0);
+        }
+        if (key.toLowerCase() === 'o') {
+          console.log(`  \x1b[36m🌐 Opening ${displayUrl} in browser...\x1b[0m`);
+          openBrowser(displayUrl);
+        }
+      });
+    }
   },
   onError: (err) => {
     console.error(`\n  \x1b[31m✖ Tunnel Error:\x1b[0m ${err.message}\n`);
