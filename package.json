@@ -22,6 +22,12 @@
     "test:versions": "node scripts/verify-versions.js",
     "test:cli": "node --test cli/test/*.test.js",
     "test:server": "cd server && go test -count=1 ./... && go build -o /dev/null .",
+    "test:stress": "node scripts/stress-test.js",
+    "test:stress:tunnels": "node scripts/stress-test.js --scenario=tunnels",
+    "test:stress:forever": "node scripts/stress-test.js --scenario=tunnels --forever",
+    "stress": "node scripts/stress-test.js",
+    "tunnel:dev": "node cli/bin/skyhook.js 34430 --dev",
+    "tunnel:remote": "node cli/bin/skyhook.js 34430 --remote",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "publish:cli": "npm publish ./cli --access public",
     "publish:cli:gitea": "npm publish ./cli --registry https://gitea.7u.pl/api/packages/gkucmierz/npm/"

@@ -165,6 +165,10 @@ func (s *WsTunnelSession) ForwardHttp(w http.ResponseWriter, r *http.Request, re
 
 	// Wait for initial packet (either standard RESPONSE or STREAM_START)
 	select {
+	case <-time.After(35 * time.Second):
+		return errors.New("gateway timeout waiting for response from local tunnel client")
+	case <-s.closed:
+		return errors.New("tunnel disconnected during request")
 	case pkt, ok := <-packetChan:
 		if !ok || pkt == nil {
 			return errors.New("tunnel closed while waiting for response")

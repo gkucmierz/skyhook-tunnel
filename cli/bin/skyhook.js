@@ -7,6 +7,7 @@ import { exec } from 'child_process';
 import { startTunnel } from '../src/client.js';
 import { generateSubdomain } from '../src/names.js';
 import { getDeterministicPort, sanitizeSubdomain, readCurrentPackageName } from '../src/dport.js';
+import { resolveGateway } from '../src/gateway.js';
 
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const version = pkg.version;
@@ -77,18 +78,24 @@ Expose your local development servers to the public internet securely.
 \x1b[1mOptions:\x1b[0m
   --name, -n <subdomain>   Specify a custom subdomain (e.g. --name bravia)
   --dport, -d [project]    Calculate deterministic port using @gkucmierz/dport
-  --server, -s <host>      Specify gateway server (default: skyhook.7u.pl)
+  --server, -s <host>      Specify gateway server (dev, remote, or custom host/url)
+  --dev, --local           Connect to local dev gateway (localhost:17356)
+  --remote, --prod         Connect to remote production gateway (skyhook.7u.pl)
   --no-tls                 Connect using unencrypted ws:// (for local dev)
   --version, -v            Show version number
   --help, -h               Show this help message
 
 \x1b[1mExamples:\x1b[0m
-  skyhook 3000                           # Tunnel port 3000
+  skyhook 3000                           # Tunnel port 3000 via remote deploy
+  skyhook 34430 --dev                    # Tunnel port 34430 via local dev gateway
+  skyhook 34430 -s dev                   # Shorthand for local dev gateway
+  skyhook 34430 -s remote                # Explicit remote deploy (skyhook.7u.pl)
+  skyhook 34430 -s http://localhost:34430/ # Connect to dev gateway (auto-mapped to 17356)
   skyhook tv-pilot                       # Auto-detect dport for tv-pilot & route to tv-pilot.skyhook.7u.pl
   skyhook tv-pilot --name remote-pilot   # Custom public subdomain for tv-pilot
   skyhook -d                             # Auto-detect project in current dir via package.json
   skyhook http://localhost:34200/        # Tunnel from full URL
-  skyhook 8080 -s localhost:17356        # Connect to local gateway
+  skyhook 8080 -s localhost:17356        # Connect to custom gateway
 `);
   process.exit(0);
 }
@@ -154,41 +161,12 @@ if (!customSubdomain) {
   customSubdomain = generateSubdomain();
 }
 
-// Parse server
-let rawServer = 'skyhook.7u.pl';
-const serverIdx = args.findIndex((a) => a === '--server' || a === '-s');
-if (serverIdx !== -1 && args[serverIdx + 1]) {
-  rawServer = args[serverIdx + 1];
-}
+// Parse server / gateway target
+const { serverHost, isLocalhost, isSecure, targetEnvironment } = resolveGateway(args);
 
-let serverHost = rawServer.trim();
-let explicitProtocol = null;
-
-if (/^(https?|wss?):\/\//i.test(serverHost)) {
-  try {
-    const parsed = new URL(serverHost);
-    explicitProtocol = parsed.protocol.toLowerCase();
-    serverHost = parsed.host; // e.g. "localhost:17356" or "skyhook.7u.pl"
-  } catch {
-    serverHost = serverHost.replace(/^(https?|wss?):\/\//i, '').replace(/\/+$/, '');
-  }
-} else {
-  serverHost = serverHost.replace(/\/+$/, '');
-}
-
-const isLocalhost = serverHost.includes('localhost') || serverHost.includes('127.0.0.1') || serverHost.includes('0.0.0.0');
-if (isLocalhost && !serverHost.includes(':')) {
-  serverHost = `${serverHost}:17356`;
-} else if (isLocalhost && serverHost.endsWith(':34430')) {
+const rawServerArg = args.find((a, i) => (args[i - 1] === '--server' || args[i - 1] === '-s'));
+if (rawServerArg && rawServerArg.includes('34430')) {
   console.log('  \x1b[33mℹ Note: Port 34430 is the Vite UI dev server. Connecting to Go gateway on port 17356...\x1b[0m');
-  serverHost = serverHost.replace(':34430', ':17356');
-}
-
-let isSecure = true;
-if (args.includes('--tls') || explicitProtocol === 'https:' || explicitProtocol === 'wss:') {
-  isSecure = true;
-} else if (args.includes('--no-tls') || explicitProtocol === 'http:' || explicitProtocol === 'ws:' || isLocalhost) {
-  isSecure = false;
 }
 
 function openBrowser(url) {
@@ -208,10 +186,14 @@ const padTotal = Math.max(0, innerWidth - bannerVisualWidth);
 const padLeft = Math.floor(padTotal / 2);
 const padRight = padTotal - padLeft;
 
+const envBadge = targetEnvironment === 'dev'
+  ? '\x1b[33m[Dev Gateway]\x1b[0m'
+  : '\x1b[32m[Remote Deploy]\x1b[0m';
+
 console.log(`\n\x1b[36m\x1b[1m╔${'═'.repeat(innerWidth)}╗\x1b[0m`);
 console.log(`\x1b[36m\x1b[1m║${' '.repeat(padLeft)}${bannerText}${' '.repeat(padRight)}║\x1b[0m`);
 console.log(`\x1b[36m\x1b[1m╚${'═'.repeat(innerWidth)}╝\x1b[0m`);
-console.log(`  \x1b[90mConnecting to gateway:\x1b[0m ${serverHost} ...`);
+console.log(`  \x1b[90mConnecting to gateway:\x1b[0m ${serverHost} ${envBadge}...`);
 
 startTunnel({
   port: targetPort,
@@ -222,10 +204,15 @@ startTunnel({
   onReady: (ack) => {
     const portPart = serverHost.includes(':') ? `:${serverHost.split(':')[1]}` : '';
     const displayUrl = isLocalhost ? `http://${ack.subdomain}.localhost${portPart}/` : ack.url;
+    const gatewayLabel = targetEnvironment === 'dev'
+      ? `Local Dev (${serverHost})`
+      : `Remote Deploy (${serverHost})`;
+
     console.log(`\n  \x1b[32m✔ Tunnel Online!\x1b[0m\n`);
     if (detectedProjectName) {
       console.log(`  \x1b[1mProject:\x1b[0m       \x1b[35m${detectedProjectName}\x1b[0m \x1b[90m(dport: ${targetPort})\x1b[0m`);
     }
+    console.log(`  \x1b[1mGateway:\x1b[0m       ${gatewayLabel}`);
     console.log(`  \x1b[1mLocal Target:\x1b[0m  http://${targetHost}:${targetPort}`);
     console.log(`  \x1b[1mTunnel URL:\x1b[0m    \x1b[36m\x1b[4m${displayUrl}\x1b[0m`);
     console.log(`  \x1b[1mSubdomain:\x1b[0m     ${ack.subdomain}`);

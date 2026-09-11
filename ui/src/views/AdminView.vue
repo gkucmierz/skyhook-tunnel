@@ -210,6 +210,19 @@ function formatDuration(dateStr) {
   return `${Math.floor(diff / 3600)}h`;
 }
 
+function getTunnelUrl(tTunnel) {
+  if (!tTunnel) return '';
+  const isLocal = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname === '0.0.0.0'
+  );
+  if (isLocal) {
+    return `http://${tTunnel.subdomain}.localhost:17356/`;
+  }
+  return tTunnel.public_url || '';
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', handleKeyDown);
   if (adminToken.value) {
@@ -400,8 +413,8 @@ onUnmounted(() => {
                   <strong>{{ tTunnel.subdomain }}</strong>
                 </td>
                 <td class="col-url">
-                  <a :href="tTunnel.public_url" target="_blank" rel="noopener noreferrer" class="url-link">
-                    {{ tTunnel.public_url }}
+                  <a :href="getTunnelUrl(tTunnel)" target="_blank" rel="noopener noreferrer" class="url-link">
+                    {{ getTunnelUrl(tTunnel) }}
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                       <polyline points="15 3 21 3 21 9"></polyline>
